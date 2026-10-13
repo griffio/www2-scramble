@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Model viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #8fa7bd; overflow: hidden; font: 12px/1.3 system-ui, sans-serif; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  .lbl { position: absolute; color: #fff; text-shadow: 0 1px 2px #000; pointer-events: none; padding: 4px 6px; }
+  #help { position: absolute; right: 6px; bottom: 4px; color: #fff; text-shadow: 0 1px 2px #000; opacity: 0.8; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="help">?m=aircraft.spitfire[,statics.hangar | aircraft.* | statics.*]&amp;view=34|side|sider|top|bottom|front|rear|r34|chase&amp;markers=1&amp;gear=0&amp;props=0&amp;ground=1&amp;zoom=1&amp;rot=0&amp;elev=0 &middot; drag to orbit</div>
+<script type="module" src="./modelview.js"></script>
+</body>
+</html>

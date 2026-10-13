@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audio Test Bench</title>
+<style>
+  :root { --bg: #15181c; --panel: #1f242a; --fg: #e6e2d6; --dim: #9aa0a6; --acc: #d9a441; --line: #333a42; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; padding: 12px 16px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--acc); margin: 0 0 8px; }
+  button { background: #2c333b; color: var(--fg); border: 1px solid #46505b; border-radius: 5px; padding: 6px 10px; margin: 2px; cursor: pointer; font: inherit; }
+  button:hover { border-color: var(--acc); }
+  button.on { background: #6b4d14; border-color: var(--acc); }
+  #init { background: var(--acc); color: #111; font-weight: 600; }
+  label { display: flex; gap: 8px; align-items: center; margin: 3px 0; }
+  label span { width: 80px; color: var(--dim); }
+  label output { width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1; }
+  #status { color: var(--dim); font-family: ui-monospace, monospace; font-size: 12px; }
+  canvas { width: 100%; height: 120px; background: #0d0f12; border-radius: 4px; display: block; }
+  pre { font-size: 11px; max-height: 260px; overflow: auto; margin: 0; color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Procedural audio test bench</h1>
+  <button id="init">Init audio</button>
+  <button id="mute">Mute</button>
+  <label style="width:220px"><span>Volume</span><input id="vol" type="range" min="0" max="1" step="0.01" value="0.8"></label>
+  <span id="status">not initialised</span>
+</header>
+<main>
+  <section>
+    <h2>Player engine</h2>
+    <label><input type="checkbox" id="pActive" checked> active &nbsp; <input type="checkbox" id="pGround"> on ground &nbsp; <input type="checkbox" id="pCockpit" checked> in cockpit</label>
+    <label><span>Type</span><select id="pType"><option>spitfire</option><option>mosquito</option></select></label>
+    <label><span>RPM</span><input id="pRpm" type="range" min="0" max="1.2" step="0.01" value="0.85"><output></output></label>
+    <label><span>Throttle</span><input id="pThr" type="range" min="0" max="1" step="0.01" value="0.8"><output></output></label>
+    <label><span>Speed m/s</span><input id="pSpd" type="range" min="0" max="250" step="1" value="120"><output></output></label>
+    <label><span>Damage</span><input id="pDmg" type="range" min="0" max="1" step="0.01" value="0"><output></output></label>
+    <label><span>G force</span><input id="pG" type="range" min="-2" max="8" step="0.1" value="1"><output></output></label>
+  </section>
+  <section>
+    <h2>Guns</h2>
+    <div>Player: <button data-gun="cannon" data-p="1">20mm</button><button data-gun="hmg" data-p="1">13mm</button><button data-gun="mg" data-p="1">.303</button></div>
+    <div>Hold fire: <button class="auto" data-kind="cannon">20mm x10/s</button><button class="auto" data-kind="mg">.303 x18/s</button><button class="auto" data-kind="hmg">13mm x13/s</button></div>
+    <div>Enemy at 80 m right: <button data-gun="cannon" data-d="80">20mm</button><button data-gun="mg" data-d="80">mg</button><button data-gun="hmg" data-d="80">hmg</button></div>
+    <div>Enemy at 900 m: <button data-gun="cannon" data-d="900">20mm</button><button data-gun="mg" data-d="900">mg</button></div>
+  </section>
+  <section>
+    <h2>Explosions / flak / impacts</h2>
+    <div>50 m: <button data-ex="0.3" data-d="50">0.3</button><button data-ex="1" data-d="50">1</button><button data-ex="2.5" data-d="50">2.5</button></div>
+    <div>500 m: <button data-ex="1" data-d="500">1</button><button data-ex="2.5" data-d="500">2.5</button></div>
+    <div>2 km: <button data-ex="1" data-d="2000">1</button><button data-ex="2.5" data-d="2000">2.5</button> &nbsp; 4 km: <button data-ex="2.5" data-d="4000">2.5</button></div>
+    <div>Flak: <button data-flak="120">120 m</button><button data-flak="700">700 m</button><button id="barrage">barrage</button></div>
+    <div>Impact 20 m: <button data-imp="metal">metal</button><button data-imp="ground">ground</button><button data-imp="water">water</button></div>
+  </section>
+  <section>
+    <h2>Player / misc</h2>
+    <div>Hit: <button data-hit="0.2">light</button><button data-hit="0.6">medium</button><button data-hit="1">heavy</button></div>
+    <div><button id="bomb">Bomb release</button><button id="radio">Radio</button><button id="siren">Air-raid siren</button></div>
+    <div>UI: <button data-ui="click">click</button><button data-ui="select">select</button><button data-ui="kill">kill</button><button data-ui="warn">warn</button><button data-ui="start">start</button><button data-ui="victory">victory</button><button data-ui="defeat">defeat</button></div>
+  </section>
+  <section>
+    <h2>Fly-by (150 m/s, Doppler + pan)</h2>
+    <label><span>Type</span><select id="fType"><option>spitfire</option><option>mosquito</option><option selected>bf109</option><option>fw190</option><option>ju87</option><option>ju88</option></select></label>
+    <label><span>Miss dist</span><input id="fMiss" type="range" min="10" max="400" step="5" value="40"><output></output></label>
+    <label><span>Siren</span><input id="fSiren" type="range" min="0" max="1" step="0.01" value="0"><output></output></label>
+    <button id="flyby">Fly-by left to right</button><button id="dive">Stuka dive</button><button id="chaos">Dogfight (30 aircraft)</button><button id="clear">Clear</button>
+    <div id="fbInfo" style="color:var(--dim);font-size:12px"></div>
+  </section>
+  <section>
+    <h2>Output</h2>
+    <canvas id="scope" width="600" height="120"></canvas>
+    <div id="meter" style="font-family:ui-monospace,monospace;font-size:12px;color:var(--dim)"></div>
+  </section>
+  <section style="grid-column:1/-1">
+    <h2>Buffers</h2>
+    <pre id="bufs"></pre>
+  </section>
+</main>
+<script type="module">
+import { GameAudio } from '../js/audio.js';
+const audio = new GameAudio();
+window.audio = audio;
+const $ = (id) => document.getElementById(id);
+const L = { pos: { x: 0, y: 500, z: 0 }, vel: { x: 0, y: 0, z: 0 }, fwd: { x: 0, y: 0, z: -1 }, up: { x: 0, y: 1, z: 0 }, inCockpit: true };
+const at = (d, ang = 90) => { const a = ang * Math.PI / 180; return { x: L.pos.x + Math.sin(a) * d, y: L.pos.y, z: L.pos.z - Math.cos(a) * d }; };
+let sims = [];      // simulated other aircraft
+let analyser = null, peakHold = 0, maxPeak = 0;
+
+for (const inp of document.querySelectorAll('input[type=range]')) {
+  const o = inp.parentElement.querySelector('output');
+  const f = () => { if (o) o.textContent = (+inp.value).toFixed(inp.step < 1 ? 2 : 0); };
+  inp.addEventListener('input', f); f();
+}
+async function doInit() {
+  await audio.init();
+  if (!analyser && audio.ctx) {
+    analyser = audio.ctx.createAnalyser(); analyser.fftSize = 2048;
+    audio._outNode.connect(analyser);
+  }
+  const info = audio.debugInfo();
+  if (info) {
+    $('status').textContent = `ready=${audio.ready} ctx=${info.state} sr=${info.sampleRate} synth=${info.synthMs} ms`;
+    $('bufs').textContent = info.buffers.map((b) => `${b.name.padEnd(12)} dur ${b.dur.toFixed(2).padStart(5)}s  peak ${b.peak.toFixed(3)}  rms ${b.rms.toFixed(3)}`).join('\n');
+  }
+  return info;
+}
+window.doInit = doInit;
+$('init').onclick = doInit;
+$('mute').onclick = () => { audio.setMuted(!audio.muted); $('mute').classList.toggle('on', audio.muted); };
+$('vol').oninput = (e) => audio.setVolume(+e.target.value);
+
+document.querySelectorAll('[data-gun]').forEach((b) => b.onclick = () => audio.gun(b.dataset.gun, b.dataset.p ? null : at(+b.dataset.d, 70), !!b.dataset.p));
+let autoKind = null, autoT = 0;
+document.querySelectorAll('.auto').forEach((b) => b.onclick = () => {
+  const k = b.dataset.kind; autoKind = autoKind === k ? null : k;
+  document.querySelectorAll('.auto').forEach((x) => x.classList.toggle('on', x.dataset.kind === autoKind));
+});
+document.querySelectorAll('[data-ex]').forEach((b) => b.onclick = () => audio.explosion(at(+b.dataset.d, 60), +b.dataset.ex));
+document.querySelectorAll('[data-flak]').forEach((b) => b.onclick = () => audio.flak(at(+b.dataset.flak, -40)));
+$('barrage').onclick = () => { for (let i = 0; i < 12; i++) setTimeout(() => audio.flak(at(200 + Math.random() * 1500, Math.random() * 360)), i * 180 + Math.random() * 120); };
+document.querySelectorAll('[data-imp]').forEach((b) => b.onclick = () => audio.impact(at(20, Math.random() * 360), b.dataset.imp));
+document.querySelectorAll('[data-hit]').forEach((b) => b.onclick = () => audio.playerHit(+b.dataset.hit));
+document.querySelectorAll('[data-ui]').forEach((b) => b.onclick = () => audio.ui(b.dataset.ui));
+$('bomb').onclick = () => audio.bombRelease();
+$('radio').onclick = () => audio.radio();
+let sirenOn = false;
+$('siren').onclick = () => { sirenOn = !sirenOn; audio.siren(sirenOn); $('siren').classList.toggle('on', sirenOn); };
+
+function flyby(type, miss, siren) {
+  sims = sims.filter((s) => s.kind !== 'flyby');
+  // passes in front of the listener (north, -z) from west to east at 150 m/s
+  sims.push({ kind: 'flyby', id: 'fb' + Math.random(), type, x: L.pos.x - 1800, y: L.pos.y + 10, z: L.pos.z - miss, vx: 150, vy: 0, vz: 0, rpm: 1.0, siren, life: 24 });
+}
+window.flyby = flyby;
+$('flyby').onclick = () => flyby($('fType').value, +$('fMiss').value, +$('fSiren').value);
+$('dive').onclick = () => {
+  sims = sims.filter((s) => s.kind !== 'flyby');
+  // Ju 87 diving from 2.5 km above-ahead, pulling out 80 m above the listener and climbing away
+  sims.push({ kind: 'flyby', id: 'dive', type: 'ju87', x: L.pos.x, y: L.pos.y + 2500, z: L.pos.z - 1500, vx: 0, vy: -150, vz: 90, rpm: 1.05, siren: 0.1, life: 30, dive: true });
+};
+$('chaos').onclick = () => {
+  const types = ['spitfire', 'mosquito', 'bf109', 'fw190', 'ju87', 'ju88'];
+  for (let i = 0; i < 30; i++) {
+    const r = 150 + Math.random() * 2500, w = (0.05 + Math.random() * 0.1) * (Math.random() < 0.5 ? -1 : 1);
+    sims.push({ kind: 'circle', id: 'c' + i, type: types[i % 6], r, w, ph: Math.random() * 6.28, h: L.pos.y + (Math.random() - 0.5) * 600, rpm: 0.7 + Math.random() * 0.5, siren: 0, life: 60, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0 });
+  }
+};
+$('clear').onclick = () => { sims = []; };
+
+let last = performance.now(), simT = 0;
+function frame(t) {
+  const dt = Math.min(0.1, (t - last) / 1000); last = t; simT += dt;
+  L.inCockpit = $('pCockpit').checked;
+  audio.update(dt, L);
+  audio.setPlayerEngine({ active: $('pActive').checked, type: $('pType').value, rpm: +$('pRpm').value, throttle: +$('pThr').value, speed: +$('pSpd').value, damage: +$('pDmg').value, onGround: $('pGround').checked, gForce: +$('pG').value });
+  for (const s of sims) {
+    s.life -= dt;
+    if (s.kind === 'circle') {
+      s.ph += s.w * dt;
+      const sp = s.w * s.r;
+      s.x = L.pos.x + Math.cos(s.ph) * s.r; s.z = L.pos.z + Math.sin(s.ph) * s.r; s.y = s.h;
+      s.vx = -Math.sin(s.ph) * sp; s.vz = Math.cos(s.ph) * sp; s.vy = 0;
+      if (Math.random() < dt * 2) audio.gun(Math.random() < 0.5 ? 'mg' : 'cannon', s, false);
+    } else {
+      if (s.dive) {
+        const alt = s.y - L.pos.y;
+        if (alt < 250 && s.vy < 60) { s.vy += 120 * dt; s.vz += 20 * dt; }   // pull out
+        s.siren = s.vy < 0 ? Math.min(1, 0.1 + (2500 - alt) / 2200) : Math.max(0, s.siren - dt * 0.6);
+        if (alt < 400 && !s.bombed) { s.bombed = true; const bx = { x: s.x, y: L.pos.y - 500, z: s.z + 300 }; setTimeout(() => audio.explosion(bx, 2.5), 3500); }
+      }
+      s.x += s.vx * dt; s.y += s.vy * dt; s.z += s.vz * dt;
+      const dx = s.x - L.pos.x, dy = s.y - L.pos.y, dz = s.z - L.pos.z, d = Math.hypot(dx, dy, dz);
+      $('fbInfo').textContent = `${s.type} d=${d.toFixed(0)} m  pos=(${dx.toFixed(0)}, ${dy.toFixed(0)}, ${dz.toFixed(0)}) siren=${s.siren.toFixed(2)}`;
+    }
+  }
+  sims = sims.filter((s) => s.life > 0);
+  audio.setEngines(sims);
+  if (autoKind) {
+    autoT -= dt;
+    const per = autoKind === 'cannon' ? 0.1 : autoKind === 'mg' ? 1 / 18 : 1 / 13;
+    while (autoT <= 0) { audio.gun(autoKind, null, true); autoT += per; }
+  }
+  if (analyser) {
+    const buf = scopeBuf || (scopeBuf = new Float32Array(analyser.fftSize));
+    analyser.getFloatTimeDomainData(buf);
+    let p = 0; for (let i = 0; i < buf.length; i++) p = Math.max(p, Math.abs(buf[i]));
+    peakHold = Math.max(p, peakHold * 0.97); maxPeak = Math.max(maxPeak, p);
+    const cv = $('scope'), g = cv.getContext('2d');
+    g.fillStyle = '#0d0f12'; g.fillRect(0, 0, cv.width, cv.height);
+    g.strokeStyle = '#d9a441'; g.beginPath();
+    for (let i = 0; i < buf.length; i += 2) { const x = i / buf.length * cv.width, y = cv.height / 2 - buf[i] * cv.height / 2; i ? g.lineTo(x, y) : g.moveTo(x, y); }
+    g.stroke();
+    $('meter').textContent = `peak ${peakHold.toFixed(3)}  max ${maxPeak.toFixed(3)}  one-shots ${audio.debugInfo().busyOneShots}  voices [${audio.debugInfo().activeVoices.join(', ')}]`;
+  }
+  requestAnimationFrame(frame);
+}
+let scopeBuf = null;
+requestAnimationFrame(frame);
+
+// ---------------------------------------------------------------- automated self test (headless)
+window.selfTest = async () => {
+  const errors = [];
+  const tryit = (name, f) => { try { f(); } catch (e) { errors.push(name + ': ' + e.message); } };
+  // before init: all must be no-ops
+  const pre = new GameAudio();
+  tryit('pre', () => {
+    pre.update(0.016, L); pre.setPlayerEngine({ active: true }); pre.setEngines([{ id: 1, type: 'bf109', x: 1, y: 2, z: 3 }]);
+    pre.gun('cannon', null, true); pre.explosion({ x: 0, y: 0, z: 0 }, 1); pre.flak(L.pos); pre.impact(L.pos, 'metal'); pre.playerHit(1);
+    pre.bombRelease(); pre.siren(false); pre.radio(); pre.ui('kill'); pre.setMuted(true); pre.setVolume(0.5); void pre.ready; void pre.muted;
+  });
+  const t0 = performance.now();
+  const info = await doInit();
+  const initMs = performance.now() - t0;
+  await audio.init(); // idempotent
+  // odd values
+  tryit('odd', () => {
+    audio.update(NaN, null); audio.update(0.016, { pos: { x: NaN }, fwd: { x: 0, y: 0, z: 0 }, up: {} });
+    audio.setPlayerEngine({ active: true, type: 'zeppelin', rpm: NaN, throttle: Infinity, speed: -5, damage: 7, gForce: undefined });
+    audio.setEngines([null, 5, { id: 'x', type: 'nope', x: NaN }, { type: 'ju87', x: 10, y: 500, z: 0, siren: NaN }]);
+    audio.setEngines('garbage'); audio.setEngines(undefined);
+    audio.gun('laser', { x: 'a' }, false); audio.gun(undefined, undefined, undefined);
+    audio.explosion(null, NaN); audio.explosion({ x: 1e12, y: 0, z: 0 }, 1); audio.flak(undefined); audio.impact({ x: 0, y: 0, z: 0 }, 'cheese');
+    audio.playerHit(NaN); audio.playerHit(-3); audio.ui('nonsense'); audio.ui(); audio.setVolume(NaN); audio.setVolume(2); audio.siren('yes'); audio.siren(0);
+  });
+  // stress: everything at once for 2.5 s, watch master peak
+  maxPeak = 0;
+  audio.setVolume(1);
+  $('chaos').click();
+  flyby('ju88', 30, 0);
+  const stressEnd = performance.now() + 2500;
+  const iv = setInterval(() => {
+    audio.gun('cannon', null, true); audio.gun('mg', null, true); audio.gun('hmg', null, true);
+    audio.gun('cannon', at(60, 30), false); audio.impact(at(30, 200), 'metal');
+    if (Math.random() < 0.3) audio.explosion(at(20 + Math.random() * 200, Math.random() * 360), 0.3 + Math.random() * 2.2);
+    if (Math.random() < 0.2) audio.flak(at(100, Math.random() * 360));
+    if (Math.random() < 0.1) audio.playerHit(Math.random());
+  }, 50);
+  tryit('all', () => { audio.siren(true); audio.radio(); audio.bombRelease(); ['click', 'select', 'kill', 'warn', 'start', 'victory', 'defeat'].forEach((k) => audio.ui(k)); });
+  await new Promise((r) => setTimeout(r, 2600));
+  clearInterval(iv);
+  const stressPeak = maxPeak;
+  audio.setMuted(true); audio.gun('cannon', null, true); audio.setMuted(false);
+  audio.siren(false);
+  const d = audio.debugInfo();
+  const bad = d.buffers.filter((b) => !(b.peak > 0.05 && b.peak < 1 && b.rms > 0.002));
+  return { initMs: +initMs.toFixed(0), synthMs: d.synthMs, ctx: d.state, sr: d.sampleRate, nBuffers: d.buffers.length, badBuffers: bad, stressPeak: +stressPeak.toFixed(3), activeVoices: d.activeVoices, busyOneShots: d.busyOneShots, errors, engines: d.buffers.filter((b) => /\.(hi|lo)$/.test(b.name)) };
+};
+</script>
+</body>
+</html>

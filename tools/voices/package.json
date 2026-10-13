@@ -1,0 +1,7 @@
+{
+  "name": "scramble-voices",
+  "private": true,
+  "type": "module",
+  "description": "Generates the radio voice lines in audio/voice/ with Kokoro TTS (run: npm i && node make-voices.mjs)",
+  "dependencies": { "kokoro-js": "1.2.1" }
+}

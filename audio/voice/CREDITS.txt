@@ -1,0 +1,3 @@
+Radio voice lines generated with Kokoro-82M (https://huggingface.co/hexgrad/Kokoro-82M, Apache-2.0)
+via kokoro-js, voices: bm_george, bm_lewis, bm_fable, bm_daniel.
+Text and voice assignments: js/voicelines.js; generator: tools/voices/make-voices.mjs.

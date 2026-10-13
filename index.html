@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scramble! Channel 1943</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23223f8f'/%3E%3Ccircle cx='16' cy='16' r='11' fill='%23fff'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23c41e1e'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="gl"></canvas>
+<canvas id="hud"></canvas>
+
+<div id="loading"><div class="logo">SCRAMBLE!</div><div class="msg">LOADING</div><div class="bar"></div></div>
+
+<div id="title" class="panel-wrap">
+  <div class="panel">
+    <div class="kicker">THE STRAIT OF DOVER &middot; SUMMER 1943</div>
+    <h1>SCRAMBLE!</h1>
+    <p class="lede">The Luftwaffe is forming up over Cap Gris-Nez. Take your flight off from RAF Hawkinge, smash their raids, then carry the fight across the Channel &mdash; <b>destroy the hangars and crater the runway</b> at Audembert, and sweep their squadrons from the sky.</p>
+    <div class="planes">
+      <div class="plane" data-type="spitfire">
+        <div class="pname">SUPERMARINE SPITFIRE MK IX</div>
+        <div class="prole">AIR SUPERIORITY FIGHTER</div>
+        <ul><li>2 &times; 20 mm Hispano cannon, 4 &times; .303 Brownings</li><li>Tight turning, fast rolling, eager climb</li><li>Your job: kill bombers, escort the Mosquitos</li></ul>
+      </div>
+      <div class="plane" data-type="mosquito">
+        <div class="pname">DE HAVILLAND MOSQUITO FB.VI</div>
+        <div class="prole">FIGHTER-BOMBER</div>
+        <ul><li>4 &times; 20 mm cannon, 4 &times; .303 in the nose</li><li>4 &times; 500 lb bombs &mdash; low-level strike</li><li>Your job: hit hangars and runways</li></ul>
+      </div>
+    </div>
+    <div class="row">
+      <div class="diff"><span>PILOTS</span><button data-diff="easy">ROOKIE</button><button data-diff="normal">VETERAN</button><button data-diff="ace">ACE</button></div>
+      <button id="go">SCRAMBLE!</button>
+    </div>
+    <div class="controls">
+      <div><b>&uarr;</b> nose down &middot; <b>&darr;</b> nose up &middot; <b>&larr;/&rarr;</b> roll &middot; <b>Q/E</b> rudder &middot; <b>SPACE</b> guns &middot; <b>B</b> bombs</div>
+      <div><b>W/S</b> throttle &middot; <b>SHIFT</b> emergency boost &middot; <b>A/D</b> also roll &middot; <b>LMB</b> guns &middot; <b>RMB</b> bombs</div>
+      <div><b>C</b> camera &middot; <b>V</b> (hold) look at target &middot; <b>T</b> next target &middot; <b>WHEEL</b> zoom &middot; <b>TAB</b> map</div>
+      <div><b>COCKPIT</b>: move the <b>mouse</b> toward the screen edges to look around &middot; <b>Z/X</b> look left / right &middot; <b>F</b> check six &middot; <b>V</b> padlock target</div>
+      <div><b>1/2/3</b> wingmen: attack my target / form up / engage &middot; <b>M</b> switch to mouse aim &middot; <b>G</b> gear</div>
+      <div><b>N</b> newsreel film &middot; <b>R</b> radio voice &middot; <b>O</b> sound &middot; <b>P/ESC</b> pause &middot; <b>`</b> performance</div>
+      <div class="hint">Land back on your own runway and stop to rearm &amp; repair. Gamepads work too.</div>
+      <div class="credits">Engine recordings from freesound.org: Rolls-Royce Merlin by <a href="https://freesound.org/people/squashy555/sounds/276597/" target="_blank" rel="noopener">squashy555</a> (CC0) &middot; Bf 109 Daimler-Benz by <a href="https://freesound.org/people/Fight2FlyPhoto/sounds/142898/" target="_blank" rel="noopener">Fight2FlyPhoto</a> (<a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>) &middot; sound effects by qubodup, craigsmith, martian, Woodingp, worthahep88, tgerginov, wyskoj, audiojacked, SvennSound (CC0), <a href="https://freesound.org/people/juskiddink/" target="_blank" rel="noopener">juskiddink</a>, <a href="https://freesound.org/people/klankbeeld/" target="_blank" rel="noopener">klankbeeld</a> and <a href="https://freesound.org/people/KVV_Audio/" target="_blank" rel="noopener">KVV_Audio</a> (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>) &middot; radio voices: <a href="https://huggingface.co/hexgrad/Kokoro-82M" target="_blank" rel="noopener">Kokoro-82M</a> (Apache-2.0) &mdash; full list in <a href="audio/CREDITS.txt" target="_blank">audio/CREDITS.txt</a></div>
+    </div>
+  </div>
+</div>
+
+<div id="pause" class="panel-wrap hidden">
+  <div class="panel small">
+    <h2>PAUSED</h2>
+    <div class="btns"><button id="resume">RESUME</button><button id="quit">QUIT TO MENU</button></div>
+    <p class="hint">Click the screen to recapture the mouse.</p>
+  </div>
+</div>
+
+<div id="respawn" class="panel-wrap hidden">
+  <div class="panel small">
+    <h2>NEXT SORTIE</h2>
+    <p class="note"></p>
+    <div class="planes small">
+      <div class="plane2" data-type="spitfire"><div class="pname">SPITFIRE</div><div class="n n-spitfire"></div></div>
+      <div class="plane2" data-type="mosquito"><div class="pname">MOSQUITO</div><div class="n n-mosquito"></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="end" class="panel-wrap hidden">
+  <div class="panel">
+    <h1>VICTORY</h1>
+    <p class="sub"></p>
+    <div class="stats"></div>
+    <div class="btns"><button id="again">FLY AGAIN</button><button id="menu">MAIN MENU</button></div>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

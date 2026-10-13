@@ -1,0 +1,87 @@
+Engine loops cut from these recordings on freesound.org (see tools/make-engine-loops.mjs):
+
+"merlin engine.wav" by squashy555 (Rolls-Royce Merlin from a Spitfire, static engine run) - CC0
+  https://freesound.org/people/squashy555/sounds/276597/
+"Bf-109 - Daimler-Benz Run-Up" by Fight2FlyPhoto - CC BY 3.0
+  https://freesound.org/people/Fight2FlyPhoto/sounds/142898/
+
+Sound effects in audio/sfx/ were cut from these recordings on freesound.org (see tools/make-sfx.mjs).
+Changes: segments cut out, filtered / EQ-ed, compressed, faded and normalised; the siren is looped and the bomb
+whistle flattened to a constant pitch and looped.
+
+"Autocannon Three Shot Burst" by qubodup - CC0
+  https://freesound.org/people/qubodup/sounds/854186/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: cannon_1, cannon_2, cannon_3
+"Air Defense Artillery Avenger Training .50cal (tH4YBTw8vk8).flac" by qubodup - CC0 (US Army training video, public domain)
+  https://freesound.org/people/qubodup/sounds/160355/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: hmg_1, hmg_2, hmg_3, hmg_4, hmg_5
+"Clean Machine Gun Burst" by qubodup - CC0 (US military video, public domain)
+  https://freesound.org/people/qubodup/sounds/482122/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: mg_1, mg_2, mg_3, mg_4, mg_5
+"Nearby explosion with debris.wav" by juskiddink - CC BY 4.0
+  https://freesound.org/people/juskiddink/sounds/108641/
+  licence: https://creativecommons.org/licenses/by/4.0/
+  used for: exp_close_1
+"Explosion" by qubodup - CC0 (US government video, public domain)
+  https://freesound.org/people/qubodup/sounds/182429/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: exp_close_2
+"mortar  grenade shell 006.wav" by klankbeeld - CC BY 4.0
+  https://freesound.org/people/klankbeeld/sounds/554289/
+  licence: https://creativecommons.org/licenses/by/4.0/
+  used for: exp_close_3, flak_3
+"Explosion" by tgerginov - CC0
+  https://freesound.org/people/tgerginov/sounds/665092/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: exp_big_1
+"Heavy explosion in forest debris tree falling.flac" by wyskoj - CC0
+  https://freesound.org/people/wyskoj/sounds/530163/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: exp_big_2
+"Distant explosion.wav" by juskiddink - CC BY 4.0
+  https://freesound.org/people/juskiddink/sounds/108640/
+  licence: https://creativecommons.org/licenses/by/4.0/
+  used for: exp_far_1
+"Quarry blasting.wav" by juskiddink - CC BY 4.0
+  https://freesound.org/people/juskiddink/sounds/82682/
+  licence: https://creativecommons.org/licenses/by/4.0/
+  used for: exp_far_2, exp_far_3
+"EXPLReal_Air Explosion Medium Distance_KVV AUDIO_FREE" by KVV_Audio - CC BY 4.0
+  https://freesound.org/people/KVV_Audio/sounds/871382/
+  licence: https://creativecommons.org/licenses/by/4.0/
+  used for: flak_1
+"mortar bomb fireworks New Year Netherlands 918 pm 251231_0059" by klankbeeld - CC BY 4.0
+  https://freesound.org/people/klankbeeld/sounds/840902/
+  licence: https://creativecommons.org/licenses/by/4.0/
+  used for: flak_2
+"Foley bullet hit metal 02.wav" by martian - CC0
+  https://freesound.org/people/martian/sounds/182263/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: hit_metal_1, hit_metal_2, hit_metal_3, hit_metal_4
+"bullets hit EDIT.aif" by Woodingp - CC0
+  https://freesound.org/people/Woodingp/sounds/116645/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: hit_plane_1, hit_plane_2, hit_plane_3, hit_plane_4
+"S20-47 50 cal Browning machine gun bullet impacts.wav" by craigsmith - CC0
+  https://freesound.org/people/craigsmith/sounds/675944/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: hit_ground_1, hit_ground_2, hit_ground_3
+"Single Rock hit dirt 2.wav" by worthahep88 - CC0
+  https://freesound.org/people/worthahep88/sounds/319229/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: hit_ground_4
+"S31-17 Bullets hitting water.wav" by craigsmith - CC0
+  https://freesound.org/people/craigsmith/sounds/675947/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: hit_water_1, hit_water_2, hit_water_3, hit_water_4
+"Alarm, Air Raid Siren, Test, Devonport, Sony PCM M-10.wav" by audiojacked - CC0
+  https://freesound.org/people/audiojacked/sounds/336640/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: siren_loop
+"Whizzbang Drop.mp3" by SvennSound - CC0
+  https://freesound.org/people/SvennSound/sounds/434739/
+  licence: https://creativecommons.org/publicdomain/zero/1.0/
+  used for: bomb_whistle
