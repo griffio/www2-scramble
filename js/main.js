@@ -11,7 +11,7 @@ import { MeshBuilder, MAT } from './mesh.js';
 import { Renderer } from './render.js';
 import { Particles, P, explosion, flakBurst, impact, hitSparks } from './particles.js';
 import { HUD } from './hud.js';
-import { Input } from './input.js';
+import { Input, PAD } from './input.js';
 import { GameAudio } from './audio.js';
 import { LINES } from './voicelines.js';
 
@@ -40,6 +40,7 @@ class Game {
     this.cam = { pos: new V3(0, 200, 0), q: new Quat(), fov: 62 * DEG, vel: new V3() };
     this.camSmooth = new Quat();
     this.shake = 0; this.flash = 0; this.score = 0;
+    this.rum = { s: 0, w: 0 };     // controller rumble levels, decaying
     this.perf = { fps: 60, sim: 0, render: 0 };
     this.dyn = { avg: 1 / 60, cool: 3 };
     this.wingOrder = 'engage';
@@ -269,6 +270,12 @@ class Game {
     });
     this.canvas.addEventListener('click', () => { if (this.state === 'play' && !this.paused && this.mouseAim) this.input.lock(); });
     window.addEventListener('keydown', (e) => { if (e.code === 'Enter' && this.state === 'title') go(); });
+    // a controller press doesn't count as a user gesture: started from the pad, the sound stays
+    // suspended until the first click or key press
+    const wake = () => { if (this.audio.ctx && this.audio.ctx.state === 'suspended') this.audio.init(); };
+    window.addEventListener('pointerdown', wake); window.addEventListener('keydown', wake);
+    // the mouse takes over from the controller's menu focus ring
+    document.addEventListener('mousemove', (e) => { if (this.navEl && (e.movementX || e.movementY) && !this.input.mouse.locked) this.navFocus(null); });
   }
   setPaused(p) {
     this.paused = p;
@@ -291,30 +298,104 @@ class Game {
   // ---------------------------------------------------------------- input
   handleKeys() {
     const inp = this.input;
+    for (const n of inp.padNotes) this.padNotice(n);
+    inp.padNotes.length = 0;
+    // a menu opening with a controller in hand starts with its default button focused
+    const nav = inp.pad && this.navItems();
+    if (nav && nav.key !== this.navKey) this.navFocus(nav.def);
+    this.navKey = nav ? nav.key : null;
     for (const k of inp.consume()) {
       if (k === 'Backquote') this.showPerf = !this.showPerf;
       if (k === 'KeyN') this.newsreel = !this.newsreel;
+      if (k.startsWith('Pad') && this.menuNav(k)) continue;
       if (this.state !== 'play') continue;
-      if (k === 'KeyP' || k === 'Pad9') this.setPaused(!this.paused);
+      if (k === 'KeyP' || k === 'Pad' + PAD.OPTIONS) this.setPaused(!this.paused);
       if (k === 'Escape' && !this.paused) this.setPaused(true);
       if (this.paused) continue;
-      if (k === 'KeyC' || k === 'Pad1') this.camMode = { chase: 'cockpit', cockpit: 'cinematic', cinematic: 'chase' }[this.camMode] || 'chase';
+      if (k === 'KeyC' || k === 'Pad' + PAD.CIRCLE) this.camMode = { chase: 'cockpit', cockpit: 'cinematic', cinematic: 'chase' }[this.camMode] || 'chase';
       if (k === 'KeyM') { this.mouseAim = !this.mouseAim; localStorage.setItem('scramble.mouseAim', this.mouseAim ? 'on' : 'off'); this.hud.radio(this.mouseAim ? 'CONTROLS: MOUSE AIM' : 'CONTROLS: ARROW KEYS / JOYSTICK', 'info'); if (this.mouseAim) { this.resetAim(); this.input.lock(); } else this.input.unlock(); }
-      if (k === 'KeyT' || k === 'Pad2') this.cycleTarget();
-      if (k === 'KeyG' && this.sim.player) { const p = this.sim.player; p.gearUp = !p.gearUp; p.gearAuto = false; this.hud.radio(`GEAR ${p.gearUp ? 'UP' : 'DOWN'} (MANUAL)`, 'info'); }
-      if (k === 'Tab') this.bigMap = !this.bigMap;
+      if (k === 'KeyT' || k === 'Pad' + PAD.SQUARE) this.cycleTarget();
+      if ((k === 'KeyG' || k === 'Pad' + PAD.SHARE) && this.sim.player) { const p = this.sim.player; p.gearUp = !p.gearUp; p.gearAuto = false; this.hud.radio(`GEAR ${p.gearUp ? 'UP' : 'DOWN'} (MANUAL)`, 'info'); }
+      if (k === 'Tab' || k === 'Pad' + PAD.TOUCHPAD) this.bigMap = !this.bigMap;
       if (k === 'KeyR') { this.voice = !this.voice; localStorage.setItem('scramble.voice', this.voice ? 'on' : 'off'); this.hud.radio(`RADIO VOICE ${this.voice ? 'ON' : 'OFF'}`, 'info'); }
       if (k === 'KeyO') { this.audio.setMuted(!this.audio.muted); }
-      if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') {
-        const o = { Digit1: 'attack', Digit2: 'cover', Digit3: 'engage' }[k];
-        this.wingOrder = o;
-        if (this.sim.playerGroup) this.sim.playerGroup.order = o;
-        const txt = { attack: 'RED SECTION, ATTACK MY TARGET!', cover: 'RED SECTION, FORM UP ON ME!', engage: 'RED SECTION, ENGAGE AT WILL!' }[o];
-        this.hud.radio(`YOU: ${txt}`, 'wing');
-        this.say(`order_${o}`);
-        setTimeout(() => { this.hud.radio(`${o === 'cover' ? 'RED 2: FORMING UP, LEADER' : 'RED 2: WILCO, LEADER!'}`, 'wing'); this.say(o === 'cover' ? 'forming_up' : 'wilco'); }, 900);
+      if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') this.orderWingmen({ Digit1: 'attack', Digit2: 'cover', Digit3: 'engage' }[k]);
+      // D-pad left / right: step through the wingman orders (every order is one press away)
+      if (k === 'Pad' + PAD.LEFT || k === 'Pad' + PAD.RIGHT) {
+        const O = ['attack', 'cover', 'engage'], i = O.indexOf(this.wingOrder);
+        this.orderWingmen(O[(i + (k === 'Pad' + PAD.RIGHT ? 1 : 2)) % 3]);
       }
     }
+  }
+  orderWingmen(o) {
+    this.wingOrder = o;
+    if (this.sim.playerGroup) this.sim.playerGroup.order = o;
+    const txt = { attack: 'RED SECTION, ATTACK MY TARGET!', cover: 'RED SECTION, FORM UP ON ME!', engage: 'RED SECTION, ENGAGE AT WILL!' }[o];
+    this.hud.radio(`YOU: ${txt}`, 'wing');
+    this.say(`order_${o}`);
+    setTimeout(() => { this.hud.radio(`${o === 'cover' ? 'RED 2: FORMING UP, LEADER' : 'RED 2: WILCO, LEADER!'}`, 'wing'); this.say(o === 'cover' ? 'forming_up' : 'wilco'); }, 900);
+  }
+  padNotice(n) {
+    const g = n.kind === 'ps'
+      ? { a: '\u2715', b: '\u25CB', x: '\u25A1', y: '\u25B3', lb: 'L1', rb: 'R1', lt: 'L2', rt: 'R2', ls: 'L3', rs: 'R3', view: 'SHARE', menu: 'OPTIONS', pad: 'TOUCHPAD' }
+      : { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'LB', rb: 'RB', lt: 'LT', rt: 'RT', ls: 'L-STICK', rs: 'R-STICK', view: 'VIEW', menu: 'MENU', pad: '' };
+    const el = $('#title .padctl');
+    if (el) {
+      el.classList.toggle('hidden', !n.on);
+      el.innerHTML = `<b>${n.name}</b>: <b>LEFT STICK</b> fly &middot; <b>${g.lb}/${g.rb}</b> rudder &middot; <b>${g.rt}</b> guns &middot; <b>${g.lt}</b> or <b>${g.a}</b> bombs &middot; <b>D-PAD &uarr;/&darr;</b> throttle &middot; <b>${g.ls}</b> boost`
+        + `<br><b>RIGHT STICK</b> look around &middot; <b>${g.rs}</b> check six &middot; <b>${g.y}</b> (hold) look at target &middot; <b>${g.x}</b> next target &middot; <b>${g.b}</b> camera &middot; <b>D-PAD &larr;/&rarr;</b> wingmen orders`
+        + `<br><b>${g.view}</b> gear &middot; ${g.pad ? `<b>${g.pad}</b> map &middot; ` : ''}<b>${g.menu}</b> pause &middot; menus: <b>D-PAD</b> / stick + <b>${g.a}</b>, <b>${g.menu}</b> scramble`;
+    }
+    if (this.state === 'play') this.hud.radio(`${n.name} ${n.on ? 'CONNECTED' : 'DISCONNECTED'}`, 'info');
+    if (!n.on && this.state === 'play' && !this.paused && !this.dead) this.setPaused(true);
+  }
+
+  // Menus with a controller: D-pad / left stick moves a focus ring between the visible overlay's
+  // buttons, Cross / A presses, Circle / B backs out of the pause menu, Options / Menu starts.
+  // Returns true when the press was used by a menu.
+  navItems() {
+    const vis = (id) => !$(id).classList.contains('hidden');
+    let sel, def;
+    if (vis('#pause')) { sel = '#pause button'; def = '#resume'; }
+    else if (vis('#end')) { sel = '#end button'; def = '#again'; }
+    else if (vis('#respawn')) { sel = '#respawn .plane2:not(.dis)'; def = `#respawn .plane2[data-type=${this.selType}]:not(.dis)`; }
+    else if (this.state === 'title' && vis('#title')) { sel = '#title .plane, #title .diff button, #go'; def = '#go'; }
+    else return null;
+    const items = [...document.querySelectorAll(sel)];
+    return { key: sel, items, def: $(def) || items[0] };
+  }
+  navFocus(el) {
+    if (this.navEl) this.navEl.classList.remove('padfocus');
+    this.navEl = el;
+    if (el) { el.classList.add('padfocus'); el.scrollIntoView?.({ block: 'nearest' }); }
+  }
+  menuNav(k) {
+    const nav = this.navItems();
+    if (!nav) return false;
+    const { items, def } = nav;
+    let cur = items.includes(this.navEl) ? this.navEl : null;
+    const dir = { [PAD.UP]: 'Up', [PAD.DOWN]: 'Down', [PAD.LEFT]: 'Left', [PAD.RIGHT]: 'Right' }[k.slice(3)] || (k.startsWith('PadNav') ? k.slice(6) : null);
+    const focus = (el) => this.navFocus(el);
+    if (dir) {
+      if (!cur) { focus(def); return true; }
+      // spatial: nearest item in that direction, off-axis distance weighted
+      const r = cur.getBoundingClientRect(), cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+      let best = null, bs = 1e9;
+      for (const el of items) {
+        if (el === cur) continue;
+        const q = el.getBoundingClientRect(), dx = q.x + q.width / 2 - cx, dy = q.y + q.height / 2 - cy;
+        const along = { Up: -dy, Down: dy, Left: -dx, Right: dx }[dir], off = dir === 'Up' || dir === 'Down' ? Math.abs(dx) : Math.abs(dy);
+        if (along <= 1) continue;
+        const sc = along + off * 2;
+        if (sc < bs) { bs = sc; best = el; }
+      }
+      if (best) { focus(best); this.audio.ui('select'); }
+      return true;
+    }
+    if (k === 'Pad' + PAD.CROSS) { (cur || def)?.click(); return true; }
+    if (k === 'Pad' + PAD.CIRCLE && !$('#pause').classList.contains('hidden')) { this.setPaused(false); return true; }
+    if (k === 'Pad' + PAD.OPTIONS && this.state !== 'play') { (this.state === 'title' ? $('#go') : $('#again')).click(); return true; }
+    return k.startsWith('PadNav');   // other buttons fall through (Options still unpauses)
   }
   resetAim() { const p = this.sim.player; if (!p) return; this.aimYaw = p.compass; this.aimPitch = p.pitchAngle; }
 
@@ -365,12 +446,12 @@ class Game {
     if (ax.active.roll) ctl.roll = ax.roll;
     if (ax.active.yaw) ctl.yaw = ax.yaw;
     // throttle
-    if (inp.down('KeyW') || inp.padBtn(5)) this.throttle = Math.min(1, this.throttle + dt * 0.7);
-    if (inp.down('KeyS') || inp.padBtn(4)) this.throttle = Math.max(0, this.throttle - dt * 0.7);
+    if (inp.down('KeyW') || inp.padBtn(PAD.UP)) this.throttle = Math.min(1, this.throttle + dt * 0.7);
+    if (inp.down('KeyS') || inp.padBtn(PAD.DOWN)) this.throttle = Math.max(0, this.throttle - dt * 0.7);
     ctl.throttle = this.throttle;
-    ctl.boost = inp.down('ShiftLeft', 'ShiftRight') || inp.padBtn(10);
-    ctl.fire = (inp.mouse.buttons & 1) !== 0 || inp.down('Space', 'ControlLeft') || inp.padVal(7) > 0.4;
-    ctl.bomb = (inp.mouse.buttons & 4) !== 0 || inp.down('KeyB') || inp.padBtn(0);
+    ctl.boost = inp.down('ShiftLeft', 'ShiftRight') || inp.padBtn(PAD.L3);
+    ctl.fire = (inp.mouse.buttons & 1) !== 0 || inp.down('Space', 'ControlLeft') || inp.padVal(PAD.R2) > 0.4;
+    ctl.bomb = (inp.mouse.buttons & 4) !== 0 || inp.down('KeyB') || inp.padBtn(PAD.CROSS) || inp.padVal(PAD.L2) > 0.4;
     ctl.brake = this.throttle < 0.05;
   }
 
@@ -420,8 +501,21 @@ class Game {
     this.perf.fps = lerp(this.perf.fps, dt > 0 ? 1 / dt : 60, 0.05);
     this.drawHud(dt);
     this.updateAudio(dt);
+    this.updateRumble(dt);
     this.dynamicResolution(dt);
     if (this.state === 'play') this.gameFlow(dt);
+  }
+
+  updateRumble(dt) {
+    const R = this.rum, p = this.sim.player;
+    // a constant light buzz from the engine on emergency boost and in a stall buffet
+    let s = R.s, w = R.w;
+    if (this.state === 'play' && !this.paused && p && p.alive) {
+      if (p.ctl.boost) w = Math.max(w, 0.12);
+      if (p.stall > 0.2) { s = Math.max(s, p.stall * 0.35); w = Math.max(w, p.stall * 0.5); }
+    } else if (this.paused || this.state !== 'play') s = w = 0;
+    this.input.rumble(s, w, dt);
+    R.s *= Math.exp(-dt * 9); R.w *= Math.exp(-dt * 14);
   }
 
   gameFlow(dt) {
@@ -461,13 +555,14 @@ class Game {
             } else ps.emit(P.muzzle, e.x, e.y, e.z, a.vel.x, a.vel.y, a.vel.z, 0.7);
           } else if (!e.ac && near(e.x, e.y, e.z, 4000)) ps.emit(P.muzzle, e.x, e.y + 1, e.z, 0, 0, 0, 2);
           if (play || near(e.x, e.y, e.z, 2000)) A.gun(e.kind === 'aa' ? 'cannon' : e.kind === 'gunner' ? 'mg' : e.kind, e, isP);
+          if (isP && play) { if (e.kind === 'cannon') this.rum.s = Math.max(this.rum.s, 0.3); this.rum.w = Math.max(this.rum.w, 0.35); }
           break;
         }
         case 'hit': {
           const big = e.kind === 'cannon' || e.kind === 'aa';
           const vx = e.ac ? e.ac.vel.x : 0, vy = e.ac ? e.ac.vel.y : 0, vz = e.ac ? e.ac.vel.z : 0;
           if (near(e.x, e.y, e.z, 4000)) hitSparks(ps, e.x, e.y, e.z, vx, vy, vz, big);
-          if (e.ac && e.ac === p) { A.playerHit(big ? 0.8 : 0.4); this.shake = Math.max(this.shake, big ? 0.35 : 0.15); }
+          if (e.ac && e.ac === p) { A.playerHit(big ? 0.8 : 0.4); this.shake = Math.max(this.shake, big ? 0.35 : 0.15); this.rum.s = Math.max(this.rum.s, big ? 0.9 : 0.55); }
           else if (near(e.x, e.y, e.z, 400)) A.impact(e, 'metal');
           if (e.ac && e.ac !== p && sim.playerTarget === e.ac) this.hitMarker = 0.15;
           break;
@@ -479,14 +574,14 @@ class Game {
         case 'explode':
           explosion(ps, e.x, e.y, e.z, e.size, e.kind, e.vx || 0, e.vy || 0, e.vz || 0);
           A.explosion(e, e.size);
-          { const d = Math.hypot(e.x - this.cam.pos.x, e.y - this.cam.pos.y, e.z - this.cam.pos.z); this.shake = Math.max(this.shake, clamp(e.size * 120 / (d + 50), 0, 1)); this.flash = Math.max(this.flash, clamp(e.size * 60 / (d + 40), 0, 0.5)); }
+          { const d = Math.hypot(e.x - this.cam.pos.x, e.y - this.cam.pos.y, e.z - this.cam.pos.z); this.shake = Math.max(this.shake, clamp(e.size * 120 / (d + 50), 0, 1)); if (play) this.rum.s = Math.max(this.rum.s, clamp(e.size * 150 / (d + 50), 0, 1)); this.flash = Math.max(this.flash, clamp(e.size * 60 / (d + 40), 0, 0.5)); }
           break;
         case 'debris':
           for (let k = 0; k < 6; k++) ps.emit(P.debris, e.x, e.y, e.z, e.vx * 0.6 + (rnd() - 0.5) * 50, e.vy * 0.6 + rnd() * 30, e.vz * 0.6 + (rnd() - 0.5) * 50, 1 + rnd(), 2);
           break;
-        case 'flak': flakBurst(ps, e.x, e.y, e.z); A.flak(e); break;
+        case 'flak': flakBurst(ps, e.x, e.y, e.z); A.flak(e); if (play) { const d = Math.hypot(e.x - this.cam.pos.x, e.y - this.cam.pos.y, e.z - this.cam.pos.z); this.rum.s = Math.max(this.rum.s, clamp(60 / (d + 20), 0, 0.7)); } break;
         case 'flakfire': if (near(e.x, e.y, e.z, 5000)) { ps.emit(P.flash, e.x, e.y + 2, e.z, 0, 0, 0, 0.6); ps.emit(P.smoke, e.x, e.y + 3, e.z, 0, 4, 0, 1); } break;
-        case 'bombdrop': if (e.ac === p) A.bombRelease(); break;
+        case 'bombdrop': if (e.ac === p) { A.bombRelease(); this.rum.s = Math.max(this.rum.s, 0.5); } break;
         case 'kill': {
           if (!play) break;
           if (e.killer && e.killer === p) { A.ui('kill'); }
@@ -618,7 +713,7 @@ class Game {
       if (!follow) return;
       return this.chaseCam(follow, dt, false);
     }
-    const lookTarget = this.camMode !== 'cockpit' && (this.input.down('KeyV') || this.input.padBtn(3)) && sim.playerTarget && sim.playerTarget.alive;
+    const lookTarget = this.camMode !== 'cockpit' && (this.input.down('KeyV') || this.input.padBtn(PAD.TRIANGLE)) && sim.playerTarget && sim.playerTarget.alive;
     if (lookTarget) return this.targetCam(follow, sim.playerTarget, dt);
     if (this.camMode === 'cockpit') return this.cockpitCam(follow, dt);
     if (this.camMode === 'cinematic') return this.flybyCam(follow, dt);
@@ -637,6 +732,17 @@ class Game {
       if (!this.chaseInit) { this.camSmooth.copy(a.rq); this.chaseInit = true; }
       this.camSmooth.slerp(a.rq, 1 - Math.exp(-dt * 6));
       cam.q.copy(this.camSmooth);
+      // right stick orbits the camera around the aircraft (R3: look back); springs back when released
+      const O = this.orbit || (this.orbit = { yaw: 0, pitch: 0 }), lk = this.input.look;
+      let oy = -lk.x * 170 * DEG, op = -lk.y * 60 * DEG;
+      if (this.input.padBtn(PAD.R3)) { oy = 180 * DEG; op = -10 * DEG; }
+      if (a !== this.sim.player || this.paused) oy = op = 0;
+      O.yaw = damp(O.yaw, oy, 6, dt); O.pitch = damp(O.pitch, op, 6, dt);
+      if (Math.abs(O.yaw) + Math.abs(O.pitch) > 1e-3) {
+        _q2.setAxisAngle(0, 1, 0, O.yaw); _q.setAxisAngle(1, 0, 0, O.pitch);
+        _q2.multiply(_q2.clone(), _q);
+        cam.q.multiply(this.camSmooth, _q2);
+      }
     }
     qrot(cam.q, 0, dist * 0.2 + 1.5, dist, _v);
     const tx = a.rp.x + _v.x, ty = a.rp.y + _v.y, tz = a.rp.z + _v.z;
@@ -649,8 +755,8 @@ class Game {
     this.applyShake(dt);
   }
   // Cockpit: raised eye point, wide field of view, no canopy frame around the head. Head look:
-  // mouse position over the window (edges = look along the wings / up), Z / X look left / right,
-  // F checks six, V padlocks the current target.
+  // mouse position over the window (edges = look along the wings / up) or the right stick, Z / X look
+  // left / right, F / R3 check six, V / Triangle padlock the current target.
   cockpitCam(a, dt) {
     const cam = this.cam, g = a.type.geom, inp = this.input;
     const e = g ? g.cockpit : [0, 0.9, 0.5];
@@ -661,11 +767,17 @@ class Game {
       ty = -Math.sign(inp.mouse.nx) * Math.pow(dz(inp.mouse.nx), 1.25) * 165 * DEG;
       tp = inp.mouse.ny < 0 ? Math.pow(dz(inp.mouse.ny), 1.2) * 80 * DEG : -dz(inp.mouse.ny) * 35 * DEG;
     }
+    const lk = inp.look;
+    if ((lk.x || lk.y) && !this.paused) {   // right stick: same reach as the mouse edges
+      ty = -Math.sign(lk.x) * Math.pow(Math.abs(lk.x), 1.25) * 165 * DEG;
+      tp = lk.y < 0 ? Math.pow(-lk.y, 1.2) * 80 * DEG : -lk.y * 35 * DEG;
+    }
+    if (inp.padBtn(PAD.R3)) { ty = (H.yaw < 0 ? -1 : 1) * 168 * DEG; tp = 8 * DEG; }
     if (inp.down('KeyZ')) { ty = 95 * DEG; tp = -8 * DEG; }
     if (inp.down('KeyX')) { ty = -95 * DEG; tp = -8 * DEG; }
     if (inp.down('KeyF')) { ty = (H.yaw < 0 ? -1 : 1) * 168 * DEG; tp = 8 * DEG; }
     const t = this.sim.playerTarget;
-    if ((inp.down('KeyV') || inp.padBtn(3)) && t && t.alive && a === this.sim.player) {
+    if ((inp.down('KeyV') || inp.padBtn(PAD.TRIANGLE)) && t && t.alive && a === this.sim.player) {
       qrotInv(a.rq, t.pos.x - a.pos.x, t.pos.y - a.pos.y, t.pos.z - a.pos.z, _v);
       ty = clamp(Math.atan2(-_v.x, -_v.z), -170 * DEG, 170 * DEG);
       tp = clamp(Math.atan2(_v.y, Math.hypot(_v.x, _v.z)), -40 * DEG, 88 * DEG);

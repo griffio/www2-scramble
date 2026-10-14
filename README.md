@@ -62,7 +62,29 @@ Source: GitHub Actions**. All paths are relative, so the game works from the `ht
 | G | Gear (automatic by default) · land on your own runway and stop to rearm and repair |
 | Tab | Big map · **N** newsreel film look · **R** radio voices on/off · **O** sound · **P / Esc** pause · **`** performance overlay |
 
-Gamepads work too: left stick flies, right trigger fires, A bombs, bumpers throttle, B camera, X target, Y look at target.
+### Gamepad (DualShock 4 / DualSense / Xbox)
+
+Plug in or pair the controller and press any button; the title screen then lists the bindings for it. The
+browser has to expose it with the standard mapping (Chrome, Edge, Safari and Firefox all do for these pads).
+
+| PlayStation (Xbox) | |
+| --- | --- |
+| Left stick | Fly: pitch and roll (release to hold attitude) |
+| L1 / R1 (LB / RB) | Rudder |
+| R2 (RT) | Guns |
+| L2 or ✕ (LT or A) | Bombs |
+| D-pad ↑ / ↓ | Throttle · **L3** (left stick click) emergency boost |
+| Right stick | Look around: head look in the cockpit, orbit the chase camera · **R3** check six |
+| △ (Y), hold | Look at / padlock the target |
+| □ (X) | Next target |
+| ○ (B) | Camera |
+| D-pad ← / → | Wingman orders: step through attack my target / form up / engage at will |
+| Share (View) | Gear · **Touchpad** big map · **Options (Menu)** pause |
+| Menus | D-pad or left stick to move, **✕ (A)** to choose, **○ (B)** to resume, **Options** to scramble |
+
+The controller rumbles with your guns, hits taken, nearby explosions and flak, bomb release and the stall
+buffet (Chrome, Edge and Safari). Most browsers do not count a pad press as a user gesture for Web Audio, so if you start
+from the controller, the sound comes on with the first click or key press.
 
 ## What's going on under the hood
 

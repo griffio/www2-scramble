@@ -19,7 +19,7 @@ export class Aircraft {
     this.hp = type.hp; this.state = 'air';
     this.gear = 1; this.gearAuto = true;
     this.groundPitch = 0; this.heading = 0;
-    this.alpha = 0; this.beta = 0; this.nz = 1; this.speed = 0;
+    this.alpha = 0; this.beta = 0; this.nz = 1; this.speed = 0; this.stall = 0;
     this.engineDmg = 0; this.fire = 0; this.smoke = 0;
     this.ammo = type.volleys.map((v) => v.ammo);
     this.gunCool = type.volleys.map(() => 0);
@@ -103,6 +103,7 @@ export class Aircraft {
     let qc = cp * qmax * hiSpeed;
     // stall: the nose drops toward the flight path, wings rock
     const stall = Math.max(smoothstep(0.9 * ALPHA_STALL, 1.4 * ALPHA_STALL, Math.abs(alpha)), 1 - smoothstep(0.65 * vs, 0.95 * vs, V));
+    this.stall = stall;
     qc += -alpha * 2.2 * stall;
     let rc = -cr * T.roll * eff * hiSpeed;
     if (stall > 0.5) rc += Math.sin(this.age * 2.3) * 0.6 * stall;
@@ -206,7 +207,7 @@ export class Aircraft {
     const c = Math.cos(this.groundPitch), s = Math.sin(this.groundPitch);
     const mw = this.type.geom ? this.type.geom.mainWheel : [1.7, -2.2, -0.5];
     this.pos.y = world.groundAt(this.pos.x, this.pos.z) + -(c * mw[1] - s * mw[2]);
-    this.speed = V; this.alpha = this.groundPitch; this.beta = 0; this.nz = 1; this.agl = this.pos.y - gh;
+    this.speed = V; this.alpha = this.groundPitch; this.beta = 0; this.nz = 1; this.stall = 0; this.agl = this.pos.y - gh;
     this.w.set(0, 0, 0);
     // rough ground at speed
     if (V > 18 && world.slopeAt(this.pos.x, this.pos.z) < 0.97) { this.crash('ground'); return; }
