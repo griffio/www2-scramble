@@ -40,7 +40,7 @@ Hawkinge. Shot down? Pick another aircraft from your reserves while your runway 
 
 ## Deploy (GitHub Pages)
 
-`.github/workflows/pages.yml` publishes the game on every push to `main` (or run it by hand from the Actions
+`.github/workflows/pages.yml` publishes the game on every push to `master` (or run it by hand from the Actions
 tab). It syntax-checks the modules, runs a short headless AI battle as a smoke test, then uploads only what
 the game serves (`index.html`, `css/`, `js/`, `audio/`). One-time setup: repository **Settings → Pages →
 Source: GitHub Actions**. All paths are relative, so the game works from the `https://<user>.github.io/<repo>/` subpath.
