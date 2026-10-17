@@ -251,10 +251,10 @@ export class World {
       return t;
     };
     f.hangars = [];
-    for (const u of [-330, 0, 330]) f.hangars.push(T('hangar', u, 290, { hp: 260, r: 30, h: 14, stock: {} }));
+    for (const u of [-330, 0, 330]) f.hangars.push(T('hangar', u, 290, { hp: 220, r: 30, h: 14, stock: {} }));
     // the runway as three segments
     f.runway = [];
-    for (let s = 0; s < 3; s++) f.runway.push(T('runway', -500 + s * 500, 0, { hp: 100, r: 250, h: 1, seg: s, craters: [] }));
+    for (let s = 0; s < 3; s++) f.runway.push(T('runway', -500 + s * 500, 0, { hp: 90, r: 250, h: 1, seg: s, craters: [] }));
     f.tower = T('tower', 560, 230, { hp: 50, r: 9, h: 9, yaw: -f.hdg + Math.PI });
     f.fuel = [];
     for (let k = 0; k < 3; k++) f.fuel.push(T('fuel', 660 + k * 26, 420 + (k % 2) * 18, { hp: 25, r: 6, h: 6 }));
