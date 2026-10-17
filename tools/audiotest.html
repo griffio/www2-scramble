@@ -64,6 +64,7 @@
     <h2>Player / misc</h2>
     <div>Hit: <button data-hit="0.2">light</button><button data-hit="0.6">medium</button><button data-hit="1">heavy</button></div>
     <div><button id="bomb">Bomb release</button><button id="radio">Radio</button><button id="siren">Air-raid siren</button></div>
+    <div>Whiz-by: <button data-whiz="0">bullet</button><button data-whiz="1">20mm shell</button><button id="whizBurst">burst</button></div>
     <div>UI: <button data-ui="click">click</button><button data-ui="select">select</button><button data-ui="kill">kill</button><button data-ui="warn">warn</button><button data-ui="start">start</button><button data-ui="victory">victory</button><button data-ui="defeat">defeat</button></div>
   </section>
   <section>
@@ -130,6 +131,8 @@ document.querySelectorAll('[data-imp]').forEach((b) => b.onclick = () => audio.i
 document.querySelectorAll('[data-hit]').forEach((b) => b.onclick = () => audio.playerHit(+b.dataset.hit));
 document.querySelectorAll('[data-ui]').forEach((b) => b.onclick = () => audio.ui(b.dataset.ui));
 $('bomb').onclick = () => audio.bombRelease();
+document.querySelectorAll('[data-whiz]').forEach((b) => b.onclick = () => audio.whiz(at(3 + Math.random() * 6, Math.random() * 360), b.dataset.whiz === '1', 5));
+$('whizBurst').onclick = () => { for (let i = 0; i < 8; i++) setTimeout(() => audio.whiz(at(2 + Math.random() * 10, Math.random() * 360), Math.random() < 0.3, 6), i * 90 + Math.random() * 40); };
 $('radio').onclick = () => audio.radio();
 let sirenOn = false;
 $('siren').onclick = () => { sirenOn = !sirenOn; audio.siren(sirenOn); $('siren').classList.toggle('on', sirenOn); };
@@ -214,7 +217,7 @@ window.selfTest = async () => {
   tryit('pre', () => {
     pre.update(0.016, L); pre.setPlayerEngine({ active: true }); pre.setEngines([{ id: 1, type: 'bf109', x: 1, y: 2, z: 3 }]);
     pre.gun('cannon', null, true); pre.explosion({ x: 0, y: 0, z: 0 }, 1); pre.flak(L.pos); pre.impact(L.pos, 'metal'); pre.playerHit(1);
-    pre.bombRelease(); pre.siren(false); pre.radio(); pre.ui('kill'); pre.setMuted(true); pre.setVolume(0.5); void pre.ready; void pre.muted;
+    pre.bombRelease(); pre.whiz(L.pos, true, 3); pre.siren(false); pre.radio(); pre.ui('kill'); pre.setMuted(true); pre.setVolume(0.5); void pre.ready; void pre.muted;
   });
   const t0 = performance.now();
   const info = await doInit();
@@ -227,6 +230,7 @@ window.selfTest = async () => {
     audio.setEngines([null, 5, { id: 'x', type: 'nope', x: NaN }, { type: 'ju87', x: 10, y: 500, z: 0, siren: NaN }]);
     audio.setEngines('garbage'); audio.setEngines(undefined);
     audio.gun('laser', { x: 'a' }, false); audio.gun(undefined, undefined, undefined);
+    audio.whiz(null, 'x', NaN); audio.whiz({ x: NaN }, false, -1);
     audio.explosion(null, NaN); audio.explosion({ x: 1e12, y: 0, z: 0 }, 1); audio.flak(undefined); audio.impact({ x: 0, y: 0, z: 0 }, 'cheese');
     audio.playerHit(NaN); audio.playerHit(-3); audio.ui('nonsense'); audio.ui(); audio.setVolume(NaN); audio.setVolume(2); audio.siren('yes'); audio.siren(0);
   });
@@ -242,6 +246,7 @@ window.selfTest = async () => {
     if (Math.random() < 0.3) audio.explosion(at(20 + Math.random() * 200, Math.random() * 360), 0.3 + Math.random() * 2.2);
     if (Math.random() < 0.2) audio.flak(at(100, Math.random() * 360));
     if (Math.random() < 0.1) audio.playerHit(Math.random());
+    if (Math.random() < 0.3) audio.whiz(at(5, Math.random() * 360), Math.random() < 0.5, 4);
   }, 50);
   tryit('all', () => { audio.siren(true); audio.radio(); audio.bombRelease(); ['click', 'select', 'kill', 'warn', 'start', 'victory', 'defeat'].forEach((k) => audio.ui(k)); });
   await new Promise((r) => setTimeout(r, 2600));

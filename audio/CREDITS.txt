@@ -85,3 +85,21 @@ whistle flattened to a constant pitch and looped.
   https://freesound.org/people/SvennSound/sounds/434739/
   licence: https://creativecommons.org/publicdomain/zero/1.0/
   used for: bomb_whistle
+
+AI-generated sound effects (see tools/make-ai-sfx.mjs): generated with ElevenLabs text-to-sound-effects
+(eleven_text_to_sound_v2), then mixed to mono, filtered, looped or trimmed, faded and normalised.
+
+  bmw801_idle.wav <- bmw801_idle_3: "Close recording of a WWII Focke-Wulf Fw 190 BMW 801 fourteen-cylinder radial aircraft engine idling at a constant low RPM: lumpy, loping, popping radial engine idle. Steady, no change in pitch or volume. No music, no voices."
+  bmw801_power.wav <- bmw801_power_3: "Close recording of a WWII Focke-Wulf Fw 190 BMW 801 fourteen-cylinder radial aircraft engine running at full power at a constant RPM: deep, throaty, rough rumbling radial engine roar with uneven firing and a cooling-fan whine. Steady, no change in pitch or volume. No music, no voices."
+  bmw801_power2.wav <- bmw801_power_2: "Close recording of a WWII Focke-Wulf Fw 190 BMW 801 fourteen-cylinder radial aircraft engine running at full power at a constant RPM: deep, throaty, rough rumbling radial engine roar with uneven firing and a cooling-fan whine. Steady, no change in pitch or volume. No music, no voices."
+  sfx/jericho_loop.wav <- jericho_1: "Ju 87 Stuka Jericho trumpet: a propeller-driven air siren wailing at a constant pitch, a loud, screaming, sustained howl. Steady, no rise or fall in pitch. No engine. No music, no voices."
+  sfx/flyby_1.wav <- flyby_fighter_3: "A WWII single-engine piston fighter plane flies past very fast and very low, right overhead: rising V12 engine roar, a loud whoosh as it passes, then the Doppler pitch drop as it races away. No music, no voices."
+  sfx/flyby_2.wav <- flyby_fighter_2: "A WWII single-engine piston fighter plane flies past very fast and very low, right overhead: rising V12 engine roar, a loud whoosh as it passes, then the Doppler pitch drop as it races away. No music, no voices."
+  sfx/flyby_twin_1.wav <- flyby_twin_3: "A WWII twin-engine piston bomber flies past fast and low, right overhead: two droning engines beating against each other rise to a thundering roar, then the Doppler pitch drop as it passes and fades away. No music, no voices."
+  sfx/flyby_twin_2.wav <- flyby_twin_1: "A WWII twin-engine piston bomber flies past fast and low, right overhead: two droning engines beating against each other rise to a thundering roar, then the Doppler pitch drop as it passes and fades away. No music, no voices."
+  sfx/whiz_1.wav <- whiz_zip_1: "Close bullet fly-by: the short, high-pitched "zzip" whine of a single bullet passing just past the listener's head. Only one bullet, silence afterwards. No music, no voices."
+  sfx/whiz_2.wav <- whiz_zip_3: "Close bullet fly-by: the short, high-pitched "zzip" whine of a single bullet passing just past the listener's head. Only one bullet, silence afterwards. No music, no voices."
+  sfx/whiz_3.wav <- whiz_zip_4: "Close bullet fly-by: the short, high-pitched "zzip" whine of a single bullet passing just past the listener's head. Only one bullet, silence afterwards. No music, no voices."
+  sfx/whiz_cannon_1.wav <- whiz_cannon_1: "A single 20 mm cannon shell passing very close overhead: a heavy supersonic crack followed by a short tearing whoosh. Only one shell, silence afterwards. No music, no voices."
+  sfx/whiz_cannon_2.wav <- whiz_cannon_2: "A single 20 mm cannon shell passing very close overhead: a heavy supersonic crack followed by a short tearing whoosh. Only one shell, silence afterwards. No music, no voices."
+  sfx/whiz_cannon_3.wav <- whiz_cannon_3: "A single 20 mm cannon shell passing very close overhead: a heavy supersonic crack followed by a short tearing whoosh. Only one shell, silence afterwards. No music, no voices."

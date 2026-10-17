@@ -1136,6 +1136,24 @@ class Game {
     A.setEngines(list);
     A.setBombs(this.paused ? [] : sim.bombs);
     A.siren(playing && !!sim.sirenOn);
+    // enemy rounds passing within a few metres of the listener this frame: whiz-bys
+    if (playing && p && p.alive) {
+      const B = sim.bullets, lx = L.pos.x, ly = L.pos.y, lz = L.pos.z;
+      for (let i = 0; i < B.n; i++) {
+        if (B.team[i] === p.team) continue;
+        const rx = B.px[i] - lx, ry = B.py[i] - ly, rz = B.pz[i] - lz;
+        if (rx * rx + ry * ry + rz * rz > 160000) continue;
+        const vx = B.vx[i] - L.vel.x, vy = B.vy[i] - L.vel.y, vz = B.vz[i] - L.vel.z, rv = rx * vx + ry * vy + rz * vz;
+        if (rv >= 0) continue;   // already past
+        const t = -rv / (vx * vx + vy * vy + vz * vz);
+        if (t > dt) continue;    // closest approach is not in this frame
+        const mx = rx + vx * t, my = ry + vy * t, mz = rz + vz * t, miss = Math.hypot(mx, my, mz);
+        if (miss > 12) continue;
+        const k = GUN_KINDS[B.kind[i]], w = this._whizPos || (this._whizPos = { x: 0, y: 0, z: 0 });
+        w.x = lx + mx; w.y = ly + my; w.z = lz + mz;
+        A.whiz(w, k === 'cannon' || k === 'aa', miss);
+      }
+    }
   }
 
   dynamicResolution(dt) {

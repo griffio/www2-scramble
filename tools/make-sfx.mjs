@@ -210,6 +210,8 @@ console.log(`total ${(total / 1048576).toFixed(2)} MB`);
 // credits: keep the engine section of audio/CREDITS.txt, rewrite the sound-effects section
 const credF = path.join(root, 'audio', 'CREDITS.txt'), MARK = 'Sound effects in audio/sfx/';
 let cred = fs.existsSync(credF) ? fs.readFileSync(credF, 'utf8') : '';
+// the AI-generated section (tools/make-ai-sfx.mjs) at the end is kept
+const AI_MARK = 'AI-generated sound effects', aiCred = cred.includes(AI_MARK) ? cred.slice(cred.indexOf(AI_MARK)) : '';
 if (cred.includes(MARK)) cred = cred.slice(0, cred.indexOf(MARK));
 cred = cred.replace(/\s*$/, '\n\n');
 const licUrl = (l) => (l === CC0 ? 'https://creativecommons.org/publicdomain/zero/1.0/' : 'https://creativecommons.org/licenses/by/4.0/');
@@ -222,5 +224,5 @@ cred += `${MARK} were cut from these recordings on freesound.org (see tools/make
     if (k === WHISTLE.src) files.push(WHISTLE.name);
     return `"${s.title}" by ${s.user} - ${s.lic}${s.note ? ` (${s.note})` : ''}\n  ${s.page}\n  licence: ${licUrl(s.lic)}\n  used for: ${files.join(', ')}`;
   }).join('\n') + '\n';
-fs.writeFileSync(credF, cred);
+fs.writeFileSync(credF, aiCred ? cred.replace(/\s*$/, '\n\n') + aiCred : cred);
 fs.rmSync(tmp, { recursive: true, force: true });

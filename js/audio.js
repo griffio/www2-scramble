@@ -17,6 +17,9 @@ const LO_RATIO = 0.4;          // idle loop is rendered at 40% of max-continuous
 const BOMB_VOICES = 4;         // falling-bomb whistles
 const BOMB_MAX_DIST = 2200;
 const WHISTLE_HZ = 3000;       // pitch of the whistle loop (the recording is flattened to this by make-sfx)
+const JERICHO_HZ = 723;        // fundamental of the recorded Jericho-trumpet loop (printed by make-ai-sfx)
+const FLYBY_DIST = 70;         // fly-by layer: an aircraft passing closer than this (m) ...
+const FLYBY_SPEED = 70;        // ... faster than this relative to the listener (m/s)
 // recorded sound effects (audio/sfx/<file>.wav) -> this.buf slots; each file is optional
 const SFX = {
   cannon: ['cannon_1', 'cannon_2', 'cannon_3'],
@@ -32,6 +35,12 @@ const SFX = {
   water: ['hit_water_1', 'hit_water_2', 'hit_water_3', 'hit_water_4'],
   sirenLoop: ['siren_loop'],
   whistle: ['bomb_whistle'],
+  // AI-generated (tools/make-ai-sfx.mjs); recording-only: each feature is off if its files don't load
+  flyby: ['flyby_1', 'flyby_2'],
+  flybyTwin: ['flyby_twin_1', 'flyby_twin_2'],
+  jericho: ['jericho_loop'],
+  whiz: ['whiz_1', 'whiz_2', 'whiz_3'],
+  whizCannon: ['whiz_cannon_1', 'whiz_cannon_2', 'whiz_cannon_3'],
 };
 // level trims for the recordings (peak-normalised, less dense than the driven synthesized one-shots)
 const SFX_TRIM = { cannon: 1.45, hmg: 1.7, mg: 1.05, expClose: 1.35, expBig: 1.4, expFar: 1.5, flak: 1.6, metal: 1.15, clang: 1.6, ground: 1.1, water: 1.2 };
@@ -653,26 +662,33 @@ export class GameAudio {
       } finally { clearTimeout(to); }
     };
     const rms = (b) => { const d = b.getChannelData(0); let e = 0; for (let i = 0; i < d.length; i += 4) e += d[i] * d[i]; return Math.sqrt(e / (d.length / 4)); };
+    // time of the loudest 10 ms (a fly-by is started so that this lines up with the closest approach)
+    const peakT = (b) => { const d = b.getChannelData(0), w = Math.round(b.sampleRate / 100); let best = 0, bi = 0; for (let i = 0; i + w <= d.length; i += w) { let e = 0; for (let j = i; j < i + w; j += 2) e += d[j] * d[j]; if (e > best) { best = e; bi = i; } } return bi / b.sampleRate; };
     const slots = Object.keys(SFX);
     const engP = Promise.all(['merlin_idle', 'merlin_power', 'merlin_power2', 'db605_idle', 'db605_power'].map(load))
       .catch((e) => { console.warn('[audio] engine recordings unavailable, using synthesized engines:', e.message); return null; });
+    // BMW 801 radial (AI-generated, tools/make-ai-sfx.mjs)
+    const bmwP = Promise.all(['bmw801_idle', 'bmw801_power', 'bmw801_power2'].map(load))
+      .catch((e) => { console.warn('[audio] BMW 801 loops unavailable:', e.message); return null; });
     const sfxP = Promise.all(slots.map((k) => Promise.allSettled(SFX[k].map((f) => load('sfx/' + f)))));
-    const [eng, res] = await Promise.all([engP, sfxP]);
+    const [eng, bmw, res] = await Promise.all([engP, bmwP, sfxP]);
     const have = { eng: {}, buf: {} };
+    // power loops play at their recorded pitch at ~90% rpm; idle loops at their pitch near idle (rpm ~0.4)
+    const mk = (lo, hi, hiAlt, pitch) => ({ hi, lo, hiAlt, hiRate: 1.1 * pitch, loRate: 1.65 * pitch, comp: clamp(0.2 / rms(hi), 0.4, 2) * 1.45, sampled: true });
     if (eng) {
       const [mi, mp, mp2, di, dp] = eng;
-      // power loops play at their recorded pitch at ~90% rpm; idle loops at their pitch near idle (rpm ~0.4)
-      const mk = (lo, hi, hiAlt, pitch) => ({ hi, lo, hiAlt, hiRate: 1.1 * pitch, loRate: 1.65 * pitch, comp: clamp(0.2 / rms(hi), 0.4, 2) * 1.45, sampled: true });
       have.eng.merlin = mk(mi, mp, mp2, 1);
       have.eng.db605 = mk(di, dp, null, 1.12);
-      have.eng.bmw801 = mk(di, dp, null, 0.95);   // Fw 190: the Daimler-Benz recording, pitched down
+      have.eng.bmw801 = mk(di, dp, null, 0.95);   // Fw 190 without its own loops: the Daimler-Benz, pitched down
       console.log('[audio] engine recordings loaded (Merlin, Daimler-Benz)');
     }
+    if (bmw) { have.eng.bmw801 = mk(bmw[0], bmw[1], bmw[2], 1); console.log('[audio] BMW 801 loops loaded'); }
     this.sampled = {};
     const got = [], missing = [];
     slots.forEach((k, i) => {
       const ok = res[i].filter((r) => r.status === 'fulfilled').map((r) => r.value);
       if (ok.length) { have.buf[k] = ok; this.sampled[k] = ok.length; got.push(`${k}:${ok.length}`); } else missing.push(k);
+      if (k === 'flyby' || k === 'flybyTwin') for (const b of ok) b.peakT = peakT(b);
       if (ok.length < SFX[k].length && ok.length) missing.push(`${k}(${SFX[k].length - ok.length} of ${SFX[k].length})`);
     });
     if (got.length) console.log(`[audio] recorded sound effects: ${got.join(' ')}`);
@@ -914,7 +930,7 @@ export class GameAudio {
     for (let i = 0; i < ENGINE_POOL; i++) {
       const v = {
         state: 0, id: null, type: null, T: null, srcs: [], fade: c.createGain(), lp: c.createBiquadFilter(), dist: c.createGain(), pan: makePanner(c),
-        x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rpm: 0.8, siren: 0, t: 0, dop: 1, fresh: true, relStart: 0, relEnd: 0, sir: null, sirenOffAt: 0,
+        x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, rpm: 0.8, siren: 0, t: 0, dop: 1, fresh: true, relStart: 0, relEnd: 0, sir: null, sirenOffAt: 0, fbDone: false, fbBuf: null,
         rateOff: RNG.range(-0.015, 0.015),
       };
       v.fade.gain.value = 0; v.lp.type = 'lowpass'; v.lp.Q.value = 0; v.lp.frequency.value = 8000; v.dist.gain.value = 0;
@@ -988,7 +1004,7 @@ export class GameAudio {
   }
   _startVoice(v, e, now) {
     const c = this.ctx, T = TYPES[e.type], E = this.eng[T.eng];
-    v.id = e.id; v.type = e.type; v.T = T; v.E = E; v.state = 1; v.fresh = true; v.dop = 1;
+    v.id = e.id; v.type = e.type; v.T = T; v.E = E; v.state = 1; v.fresh = true; v.dop = 1; v.fbDone = false; v.fbBuf = null;
     this._voiceData(v, e, now);
     const n = T.twin ? 2 : 1;
     for (let i = 0; i < n; i++) {
@@ -1017,6 +1033,15 @@ export class GameAudio {
   _buildSiren(v) {
     // Jericho trumpet: propeller-driven siren, rotor-chopped howl
     const c = this.ctx, now = c.currentTime;
+    if (this.buf.jericho) {
+      // recorded loop (tools/make-ai-sfx.mjs), pitched with playbackRate
+      const g = c.createGain(); g.gain.value = 0; g.connect(v.fade);
+      const src = c.createBufferSource();
+      src.buffer = this.buf.jericho[0]; src.loop = true; src.playbackRate.value = 0.4;
+      src.connect(g); src.start(now, RNG.next() * src.buffer.duration);
+      v.sir = { src, g, wob: 0 };
+      return;
+    }
     const o1 = c.createOscillator(), o2 = c.createOscillator(), o3 = c.createOscillator();
     o1.type = 'sawtooth'; o2.type = 'square'; o3.type = 'triangle';
     const g1 = c.createGain(), g2 = c.createGain(), g3 = c.createGain();
@@ -1029,8 +1054,32 @@ export class GameAudio {
   }
   _killSiren(v) {
     const s = v.sir; v.sir = null;
-    for (const o of [s.o1, s.o2, s.o3]) { try { o.stop(); } catch (e) { /* */ } }
+    for (const o of s.src ? [s.src] : [s.o1, s.o2, s.o3]) { try { o.stop(); } catch (e) { /* */ } }
     try { s.g.disconnect(); } catch (e) { /* */ }
+  }
+
+  // Close pass: lay a recorded fly-by over the engine loop, started so that its loudest moment meets the
+  // closest approach. It has its own Doppler and swell baked in, so it only takes the voice's panning.
+  _flyby(v, now) {
+    const L = this._L, age = clamp(now - v.t, 0, 0.5);
+    const rx = v.x + v.vx * age - L.x, ry = v.y + v.vy * age - L.y, rz = v.z + v.vz * age - L.z;
+    if (v.fbDone) { if (rx * rx + ry * ry + rz * rz > 300 * 300) v.fbDone = false; return; }   // re-arm once well away
+    const ux = v.vx - L.vx, uy = v.vy - L.vy, uz = v.vz - L.vz, u2 = ux * ux + uy * uy + uz * uz;
+    if (u2 < FLYBY_SPEED * FLYBY_SPEED) return;
+    const tca = -(rx * ux + ry * uy + rz * uz) / u2;
+    if (tca <= 0 || tca > 2) return;
+    const mx = rx + ux * tca, my = ry + uy * tca, mz = rz + uz * tca, miss = Math.sqrt(mx * mx + my * my + mz * mz);
+    if (miss > FLYBY_DIST) return;
+    if (!v.fbBuf) v.fbBuf = this._pick(v.T.twin && this.buf.flybyTwin ? this.buf.flybyTwin : this.buf.flyby);
+    const buf = v.fbBuf, pk = buf.peakT || 0.8;
+    if (tca > pk + 0.05) return;   // wait until the lead-in lines up with the pass
+    v.fbDone = true; v.fbBuf = null;
+    const c = this.ctx, src = c.createBufferSource(), g = c.createGain();
+    src.buffer = buf;
+    g.gain.value = 0.9 * (0.4 + 0.6 * (1 - miss / FLYBY_DIST)) * clamp(Math.sqrt(u2) / 150, 0.6, 1.2);
+    src.connect(g); g.connect(v.pan);
+    src.onended = () => { try { g.disconnect(); } catch (e) { /* */ } };
+    src.start(now, Math.max(0, pk - tca));
   }
 
   // ------------------------------------------------------------------ falling-bomb whistles
@@ -1214,16 +1263,20 @@ export class GameAudio {
         v.pan.pan.setTargetAtTime(sp.pan, now, 0.05);
         v.lp.frequency.setTargetAtTime(cut, now, 0.05);
       }
+      if (v.state === 1 && this.buf.flyby) this._flyby(v, now);
       // Ju 87 Jericho trumpet
       if (v.siren > 0.01 && v.state === 1) {
         if (!v.sir) this._buildSiren(v);
         const s = v.sir;
         s.wob += dt * (2 + 3 * RNG.next());
         const f = (230 + 620 * Math.pow(v.siren, 0.85)) * (1 + 0.012 * Math.sin(s.wob)) * v.dop;
-        s.o1.frequency.setTargetAtTime(f, now, 0.05);
-        s.o2.frequency.setTargetAtTime(f * 1.006, now, 0.05);
-        s.o3.frequency.setTargetAtTime(f * 2.002, now, 0.05);
-        s.bp.frequency.setTargetAtTime(clamp(f * 3.2, 400, 8000), now, 0.05);
+        if (s.src) s.src.playbackRate.setTargetAtTime(clamp(f / JERICHO_HZ, 0.25, 4), now, 0.05);
+        else {
+          s.o1.frequency.setTargetAtTime(f, now, 0.05);
+          s.o2.frequency.setTargetAtTime(f * 1.006, now, 0.05);
+          s.o3.frequency.setTargetAtTime(f * 2.002, now, 0.05);
+          s.bp.frequency.setTargetAtTime(clamp(f * 3.2, 400, 8000), now, 0.05);
+        }
         s.g.gain.setTargetAtTime(0.55 * Math.pow(v.siren, 0.7) / (T.gain * E.comp * 0.9), now, 0.08);
         v.sirenOffAt = 0;
       } else if (v.sir) {
@@ -1411,6 +1464,20 @@ export class GameAudio {
       if (!p) return;
       const k = kind === 'ground' || kind === 'water' ? kind : 'metal';
       this._playAt(this._pick(this.buf[k]), this.bus.fx, p, (k === 'metal' ? 0.45 : 0.5) * this._trim(k), 10, 300, RNG.range(0.85, 1.2), 0.02, 0.5);
+    } catch (e) { this._fail(e); }
+  }
+
+  // a bullet or shell passing close to the listener; pos = its point of closest approach, miss in metres
+  whiz(pos, cannon, miss) {
+    if (!this._ok() || this._muted) return;
+    try {
+      const set = cannon ? this.buf.whizCannon : this.buf.whiz, now = this.ctx.currentTime;
+      if (!set || now - (this._lastWhiz || 0) < 0.07) return;
+      const p = this._pos(pos);
+      if (!p) return;
+      this._lastWhiz = now;
+      const sp = this._spatial(p.x, p.y, p.z), near = clamp(1.2 - fin(miss, 10) / 15, 0.3, 1);
+      this._play(this._pick(set), this.bus.fx, (cannon ? 0.8 : 0.6) * near, RNG.range(0.9, 1.12), 0, p, sp.pan, 20000, 0.02, 2);
     } catch (e) { this._fail(e); }
   }
 
