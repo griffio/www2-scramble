@@ -162,8 +162,38 @@ const underMat = (capCol) => (r, k, p, isCap) => (isCap && capCol ? capCol : [1,
 // mesh.wing's `thick` produces total thickness 0.21 * thick * chord; this wrapper takes the real ratio.
 const WTH = 0.21;
 const thickAt = (t) => { const x = Math.max(t, 1e-4); return 2.4 * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x * x * x - 0.1036 * x * x * x * x); };
+// Resample stations along the span with monotone cubics, so tip outlines, fin tops and gull bends come
+// out as smooth curves instead of a few straight segments. Original stations are kept.
+function smoothStations(st, step = 0.3, dmax = 0.08) {
+  if (st.length < 3) return st;
+  const xs = st.map((s) => s.x), f = {};
+  for (const k of ['y', 'z', 'chord', 'thick', 'twist']) f[k] = mono(xs, st.map((s) => s[k]));
+  const out = [];
+  for (let i = 0; i < st.length - 1; i++) {
+    const a = st[i], b = st[i + 1];
+    const n = Math.max(1, Math.ceil(Math.max((b.x - a.x) / step, Math.abs(b.chord - a.chord) / dmax, Math.abs(b.z - a.z) / dmax)));
+    out.push(a);
+    for (let j = 1; j < n; j++) { const x = lerp(a.x, b.x, j / n); out.push({ x, y: f.y(x), z: f.z(x), chord: f.chord(x), thick: f.thick(x), twist: f.twist(x) }); }
+  }
+  out.push(st[st.length - 1]);
+  return roundTip(out);
+}
+// Round off the last stretch of span (radius = half the tip chord) about the mid-chord line, so tips
+// close in a curve instead of ending on a flat chord. The span is unchanged.
+function roundTip(st) {
+  const e = st[st.length - 1], rt = Math.min(0.5 * e.chord, 0.4);
+  if (rt < 0.04 || st.length < 2) return st;
+  const x0 = e.x - rt, at = (x) => { let i = 0; while (i < st.length - 2 && st[i + 1].x < x) i++; const a = st[i], b = st[i + 1], t = clamp((x - a.x) / (b.x - a.x), 0, 1); return { x, y: lerp(a.y, b.y, t), z: lerp(a.z, b.z, t), chord: lerp(a.chord, b.chord, t), thick: lerp(a.thick, b.thick, t), twist: lerp(a.twist, b.twist, t) }; };
+  const out = st.filter((s) => s.x < x0 - 1e-6);
+  const N = 6;
+  for (let k = 0; k <= N; k++) {
+    const a = (k / N) * (PI / 2), s = at(x0 + rt * Math.sin(a)), mid = s.z + s.chord / 2, c = Math.max(0.03, s.chord * Math.cos(a));
+    out.push({ ...s, z: mid - c / 2, chord: c });
+  }
+  return out;
+}
 class Wing {
-  constructor(st) { this.st = st.map((s) => ({ y: 0, twist: 0, ...s })); }
+  constructor(st) { this.st = smoothStations(st.map((s) => ({ y: 0, twist: 0, ...s }))); }
   at(x) {
     const st = this.st;
     if (x <= st[0].x) return st[0];
@@ -190,7 +220,7 @@ class Wing {
   }
   surf(x, z, side, off = 0) { const s = this.at(x); return this.ptN(x, clamp((z - s.z) / s.chord, 0, 1), side, off); }
   tAt(x, z) { const s = this.at(x); return (z - s.z) / s.chord; }
-  build(b, colUp = W, matUp = MAT.CAMO, colDn = W, matDn = MAT.UNDER, segs = 6) {
+  build(b, colUp = W, matUp = MAT.CAMO, colDn = W, matDn = MAT.UNDER, segs = 8) {
     b.wing(this.st.map((s) => ({ ...s, thick: s.thick / WTH })), colUp, matUp, colDn, matDn, { segs });
     return this;
   }
@@ -219,6 +249,45 @@ function wingPatch(b, wing, x0, x1, t0, t1, side, col, mat = MAT.MARK, off = 0.0
       b.quad(P(xa, ta), P(xa, tb), P(xb, tb), P(xb, ta), col, mat);
     }
   }
+}
+
+// Concave fillet (right side) blending the upper wing surface into the fuselage side. It starts at chord
+// fraction t0, reaches radius rMax by tFull, and runs `aft` metres past the trailing edge, where it
+// fades into the fuselage side.
+function wingFillet(b, fus, wing, { t0 = 0.04, tFull = 0.7, rMax = 0.3, aft = 0.6, n = 14, na = 5, m = 6, mat = MAT.CAMO } = {}) {
+  const ss = (t) => { const u = clamp(t, 0, 1); return u * u * (3 - 2 * u); };
+  const s0 = wing.at(0), zm = s0.z + 0.5 * s0.chord;
+  const xr = fus.side(zm, s0.y, 1)[0], sw = wing.at(xr), zTE = sw.z + sw.chord;
+  const rings = [], base = [];
+  let xs = xr, yw = s0.y, rTE = rMax;
+  for (let i = 0; i <= n + na; i++) {
+    let z, r, B;
+    if (i <= n) {
+      const t = lerp(t0, 1, i / n);
+      z = sw.z + t * sw.chord;
+      for (let it = 0; it < 3; it++) { yw = wing.surf(xs, z, 1)[1]; xs = fus.side(z, yw, 1)[0]; }
+      r = rTE = Math.max(0.01, rMax * ss((t - t0) / (tFull - t0)));
+      B = wing.surf(xs + r, z, 1, -0.004);
+    } else {
+      // past the trailing edge: no wing below, so the fillet rides on the trailing-edge height and shrinks away
+      const u = (i - n) / na;
+      z = zTE + aft * u;
+      xs = fus.side(z, yw, 1)[0];
+      r = Math.max(0.01, rTE * (1 - ss(u)));
+      B = [xs + r, yw, z];
+    }
+    const A = fus.side(z, yw + r, 1, -0.004), C = [xs, yw, z];
+    const ring = [];
+    for (let j = 0; j <= m; j++) {
+      const u = j / m, a = (1 - u) * (1 - u), c = 2 * u * (1 - u), d = u * u;
+      ring.push([a * A[0] + c * C[0] + d * B[0], a * A[1] + c * C[1] + d * B[1], z]);
+    }
+    rings.push(ring);
+    if (i >= n) base.push([C, B]);
+  }
+  loftM(b, rings, solid(W, mat), { closed: false });
+  // underside of the part behind the trailing edge
+  loftM(b, base, solid(W, MAT.UNDER), { closed: false });
 }
 
 // ---------------------------------------------------------------- markings (2D chart -> surface)
@@ -316,9 +385,9 @@ function wheel(g, c, r, w, hubCol = COL.hub, K = 14) {
 }
 
 // spinner along -z from base z0 (radius r) to tip z1; returns radius profile
-function spinner(b, cx, cy, z0, z1, r, col, mat = MAT.PLAIN, K = 12, blunt = 0.6) {
+function spinner(b, cx, cy, z0, z1, r, col, mat = MAT.PLAIN, K = 18, blunt = 0.6) {
   const prof = (t) => r * Math.pow(Math.max(0, 1 - t * t), blunt);
-  const ts = [0, 0.25, 0.5, 0.7, 0.85, 0.95, 1];
+  const ts = [0, 0.15, 0.3, 0.45, 0.6, 0.72, 0.82, 0.9, 0.95, 0.98, 1];
   const rings = ts.map((t) => {
     const rr = t >= 1 ? 0 : prof(t), z = lerp(z0, z1, t), out = [];
     for (let k = 0; k < K; k++) { const a = (k / K) * TAU; out.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, z]); }
@@ -381,7 +450,7 @@ const mirrorPts = (arr) => arr.flatMap((p) => (Math.abs(p.x) < 1e-6 ? [p] : [p, 
 
 // ==================================================================== SPITFIRE Mk IX
 function spitfire() {
-  const b = new MeshBuilder(), g = new MeshBuilder(), K = 18;
+  const b = new MeshBuilder(), g = new MeshBuilder(), K = 24;
   const fus = new Body([
     [-2.62, 0.40, 0.40, 0.44, 0, 2.3], [-2.2, 0.44, 0.47, 0.53, 0, 2.3], [-1.4, 0.47, 0.52, 0.63, 0, 2.3],
     [-0.4, 0.50, 0.55, 0.72, 0, 2.3], [0.6, 0.50, 0.53, 0.75, 0, 2.3], [1.6, 0.45, 0.47, 0.70, 0, 2.2],
@@ -405,6 +474,7 @@ function spitfire() {
   const m0 = b.mark();
   // ---- right half, mirrored
   wing.build(b);
+  wingFillet(b, fus, wing, { rMax: 0.34 });
   tail.build(b);
   const wzc = (x, f = 0.45) => wing.at(x).z + f * wing.at(x).chord;
   roundelB(b, wing.proj(1), 3.25, wzc(3.25), 0.7);
@@ -422,7 +492,7 @@ function spitfire() {
   for (let i = 0; i < 6; i++) { const z = -2.3 + i * 0.2, y = 0.1; stub(b, fus.side(z, y, 1)[0], y, z, 0.09, 0.075, 0.13, 0.15); }
   b.mirrorX(m0.v, m0.i);
   // ---- centre parts
-  loftM(b, fus.rings(0.5, K), splitMat(K, 22, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
+  loftM(b, fus.rings(0.3, K), splitMat(K, 22, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
   // carb intake under nose
   const chin = new Body([[-1.95, 0.11, 0.06, 0.1, -0.5, 2.5], [-1.7, 0.13, 0.1, 0.16, -0.52, 2.5], [-0.9, 0.11, 0.08, 0.06, -0.58, 2.5]]);
   loftM(b, chin.rings(0.4, 8), underMat(solid(COL.intake, MAT.PLAIN)), { capStart: true });
@@ -446,7 +516,7 @@ function spitfire() {
   loftM(b, fus.rings(0.25, K, { z0: 4.05, z1: 4.5, off: 0.014 }), solid(COL.sky, MAT.MARK));
   fuselageCodes(b, fus, 2.5, -0.06, 0.42, 'ZD', 'H', 0.46, COL.codes);
   // spinner (Sky)
-  spinner(b, 0, 0, -2.6, -3.25, 0.4, COL.sky, MAT.MARK, 12, 0.55);
+  spinner(b, 0, 0, -2.6, -3.3, 0.4, COL.sky, MAT.MARK, 18, 0.78);
   // aerial mast behind canopy
   b.push(chain(T(0, 0.55, 2.0), RX(-0.25)));
   b.box(0, 0.22, 0, 0.03, 0.46, 0.12, W, MAT.CAMO);
@@ -475,7 +545,7 @@ function spitfire() {
 
 // ==================================================================== MOSQUITO FB.VI
 function mosquito() {
-  const b = new MeshBuilder(), g = new MeshBuilder(), K = 18;
+  const b = new MeshBuilder(), g = new MeshBuilder(), K = 24;
   const fus = new Body([
     [-5.32, 0.04, 0.04, 0.04, -0.1, 2], [-5.12, 0.28, 0.27, 0.3, -0.08, 2], [-4.6, 0.47, 0.47, 0.52, -0.06, 2],
     [-3.6, 0.57, 0.6, 0.64, -0.05, 2.1], [-2.4, 0.6, 0.66, 0.68, -0.05, 2.1], [-1.0, 0.6, 0.6, 0.68, -0.05, 2.1],
@@ -483,9 +553,11 @@ function mosquito() {
     [5.8, 0.24, 0.29, 0.26, 0.1, 2], [6.8, 0.12, 0.19, 0.14, 0.14, 2], [7.18, 0.03, 0.06, 0.04, 0.16, 2],
   ]);
   const wy = (x) => -0.12 + x * 0.05;
+  // straight-tapered panel out to 7.3 m, then an elliptical tip about the mid-chord line
+  const tipPts = [1, 2, 3, 4, 5, 6].map((k) => { const a = (k / 6) * (PI / 2), x = 7.3 + 0.98 * Math.sin(a), c = Math.max(0.03, 1.534 * Math.cos(a)); return [x, c, 0.287 - 0.05 * (x - 7.3) - c / 2]; });
   const wing = new Wing([
-    [0, 3.6], [0.7, 3.5], [1.6, 3.33], [2.45, 3.15], [3.4, 2.8], [5.0, 2.25], [6.5, 1.75], [7.5, 1.48], [7.95, 1.18], [8.18, 0.8], [8.28, 0.4],
-  ].map(([x, c]) => ({ x, y: wy(x), z: -1.1 + (3.6 - c) * (x > 7.6 ? 0.45 : 0.3), chord: c, thick: lerp(0.15, 0.09, x / 8.28), twist: -0.03 * (x / 8.28) })));
+    [0, 3.6], [0.7, 3.5], [1.6, 3.33], [2.45, 3.15], [3.4, 2.8], [5.0, 2.25], [6.5, 1.75], [7.3, 1.534], ...tipPts,
+  ].map(([x, c, z]) => ({ x, y: wy(x), z: z ?? -1.1 + (3.6 - c) * 0.3, chord: c, thick: lerp(0.15, 0.09, x / 8.28), twist: -0.03 * (x / 8.28) })));
   const tail = new Wing([[0, 1.62, 5.5], [1.6, 1.4, 5.62], [2.3, 1.15, 5.78], [2.62, 0.8, 5.98], [2.75, 0.38, 6.2]].map(([x, c, z]) => ({ x, y: 0.12, z, chord: c, thick: 0.1 })));
   const fin = new Wing([[0.2, 4.85, 2.3], [0.55, 5.0, 2.12], [1.1, 5.35, 1.78], [1.6, 5.7, 1.4], [2.0, 6.02, 1.03], [2.25, 6.3, 0.7], [2.37, 6.55, 0.35]].map(([x, z, c]) => ({ x, z, chord: c, thick: 0.1 })));
   const nac = new Body([
@@ -500,9 +572,9 @@ function mosquito() {
   // radiator intakes in inner wing leading edge
   wingLE(b, wing, 0.75, 1.95, 0.025, COL.intake, MAT.PLAIN, 0.01, 2, 4);
   b.push(T(NX, 0, 0));
-  loftM(b, nac.rings(0.75, 12), splitMat(12, 15, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
+  loftM(b, nac.rings(0.35, 18), splitMat(18, 15, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
   b.pop();
-  spinner(b, NX, -0.1, -3.1, -3.75, 0.36, COL.black, MAT.PLAIN, 14, 0.6);
+  spinner(b, NX, -0.1, -3.1, -3.8, 0.36, COL.black, MAT.PLAIN, 18, 0.72);
   for (const side of [-1, 1]) for (let i = 0; i < 5; i++) {
     const z = -2.75 + i * 0.2, y = 0.02;
     b.push(T(NX, 0, 0));
@@ -516,7 +588,7 @@ function mosquito() {
   b.box(hx, ha.y - 0.17, ha.z + 0.45 * ha.chord, 0.08, 0.16, 0.6, W, MAT.UNDER);
   b.mirrorX(m0.v, m0.i);
   // ---- centre
-  loftM(b, fus.rings(0.6, K), splitMat(K, 15));
+  loftM(b, fus.rings(0.3, K), splitMat(K, 15));
   // canopy (side-by-side, framed)
   const can = new Body([[-3.55, 0.4, 0.02, 0.12, 0.38, 2.4], [-3.05, 0.5, 0.44, 0.1, 0.38, 2.6], [-2.45, 0.55, 0.58, 0.1, 0.38, 2.4], [-1.85, 0.48, 0.5, 0.1, 0.38, 2.2], [-1.4, 0.3, 0.24, 0.1, 0.38, 2.2]]);
   canopyLoft(b, can, 0.2);
@@ -579,7 +651,7 @@ function mosquito() {
 
 // ==================================================================== Bf 109 G
 function bf109() {
-  const b = new MeshBuilder(), g = new MeshBuilder(), K = 18;
+  const b = new MeshBuilder(), g = new MeshBuilder(), K = 24;
   const fus = new Body([
     [-2.55, 0.36, 0.38, 0.40, 0, 2.2], [-2.1, 0.40, 0.43, 0.48, 0, 2.3], [-1.2, 0.42, 0.44, 0.56, -0.02, 2.4],
     [-0.3, 0.43, 0.42, 0.6, -0.04, 2.4], [0.6, 0.41, 0.4, 0.6, -0.05, 2.4], [1.6, 0.36, 0.38, 0.55, -0.03, 2.3],
@@ -595,6 +667,7 @@ function bf109() {
   const fin = new Wing([[0.15, 4.58, 1.24], [0.7, 4.72, 1.08], [1.05, 4.9, 0.86], [1.22, 5.08, 0.6], [1.31, 5.3, 0.3]].map(([x, z, c]) => ({ x, z, chord: c, thick: 0.1 })));
   const m0 = b.mark();
   wing.build(b);
+  wingFillet(b, fus, wing, { rMax: 0.2 });
   tail.build(b);
   const wz = (x, f = 0.45) => wing.at(x).z + f * wing.at(x).chord;
   balken(b, wing.proj(1), 3.7, wz(3.7), 0.85);
@@ -606,7 +679,7 @@ function bf109() {
   b.pop();
   for (let i = 0; i < 6; i++) { const z = -2.05 + i * 0.17, y = -0.06; stub(b, fus.side(z, y, 1)[0], y, z, 0.08, 0.07, 0.12, 0.2); }
   b.mirrorX(m0.v, m0.i);
-  loftM(b, fus.rings(0.5, K), splitMat(K, 0, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
+  loftM(b, fus.rings(0.3, K), splitMat(K, 0, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
   // yellow cowling band
   loftM(b, fus.rings(0.25, K, { z0: -2.55, z1: -1.55, off: 0.013 }), solid(COL.yellow, MAT.MARK));
   // oil cooler chin + supercharger intake (left)
@@ -639,9 +712,9 @@ function bf109() {
   }
   b.pop();
   for (const side of [-1, 1]) balken(b, (u, v, o = 0) => fus.side(u, v, side, 0.015 + o), 2.75, 0.0, 0.7);
-  const prof = spinner(b, 0, 0, -2.53, -3.15, 0.37, COL.spinGer, MAT.PLAIN, 12, 0.5);
-  spinnerSpiral(b, 0, 0, -2.53, -3.15, prof);
-  bar(b, [0, 0, -3.1], [0, 0, -3.24], 0.03, COL.gun, MAT.METAL, 6);
+  const prof = spinner(b, 0, 0, -2.53, -3.2, 0.37, COL.spinGer, MAT.PLAIN, 18, 0.72);
+  spinnerSpiral(b, 0, 0, -2.53, -3.2, prof);
+  bar(b, [0, 0, -3.14], [0, 0, -3.28], 0.03, COL.gun, MAT.METAL, 6);
   b.box(0, 0.5, 1.5, 0.025, 0.25, 0.08, W, MAT.CAMO);
   // ---- gear (narrow track, splayed)
   const mg = g.mark();
@@ -656,7 +729,7 @@ function bf109() {
     fixedGear: false,
     camo: { a: [0.29, 0.31, 0.32], b: [0.42, 0.42, 0.44], under: [0.66, 0.73, 0.78], scale: 1.6 },
     props: [{ x: 0, y: 0, z: -2.85, r: 1.5, blades: 3, dir: 1 }],
-    guns: [{ x: 0, y: 0, z: -3.25, kind: 'cannon' }, { x: -0.12, y: 0.36, z: -2.25, kind: 'hmg' }, { x: 0.12, y: 0.36, z: -2.25, kind: 'hmg' }],
+    guns: [{ x: 0, y: 0, z: -3.28, kind: 'cannon' }, { x: -0.12, y: 0.36, z: -2.25, kind: 'hmg' }, { x: 0.12, y: 0.36, z: -2.25, kind: 'hmg' }],
     gunners: [], hardpoints: [],
     mainWheel: [wc[0], wc[1] - wr, wc[2]], tailWheel: [0, -0.55, 5.15],
     cockpit: [0, 0.6, 0.4],
@@ -667,7 +740,7 @@ function bf109() {
 
 // ==================================================================== Fw 190 A
 function fw190() {
-  const b = new MeshBuilder(), g = new MeshBuilder(), K = 18;
+  const b = new MeshBuilder(), g = new MeshBuilder(), K = 24;
   const fus = new Body([
     [-2.78, 0.6, 0.6, 0.6, 0, 2], [-2.5, 0.67, 0.67, 0.67, 0, 2], [-1.75, 0.67, 0.67, 0.67, 0, 2],
     [-1.1, 0.58, 0.58, 0.6, -0.02, 2.1], [-0.2, 0.5, 0.54, 0.6, -0.04, 2.2], [0.6, 0.46, 0.5, 0.58, -0.04, 2.2],
@@ -683,6 +756,7 @@ function fw190() {
   const fin = new Wing([[0.15, 4.35, 1.3], [0.7, 4.5, 1.12], [1.05, 4.66, 0.9], [1.25, 4.85, 0.62], [1.34, 5.05, 0.3]].map(([x, z, c]) => ({ x, z, chord: c, thick: 0.1 })));
   const m0 = b.mark();
   wing.build(b);
+  wingFillet(b, fus, wing, { rMax: 0.24 });
   tail.build(b);
   const wz = (x, f = 0.45) => wing.at(x).z + f * wing.at(x).chord;
   balken(b, wing.proj(1), 3.8, wz(3.8), 0.9);
@@ -690,7 +764,7 @@ function fw190() {
   for (const x of [0.95, 2.3]) { const a = wing.at(x); bar(b, [x, a.y - 0.02, a.z + 0.1], [x, a.y - 0.02, a.z - (x > 2 ? 0.35 : 0.08)], 0.025, COL.gun, MAT.METAL, 5); }
   for (let i = 0; i < 4; i++) { const y = -0.15 - i * 0.1, z = -0.95; stub(b, fus.side(z, y, 1)[0], y, z, 0.08, 0.06, 0.18, 0.3); }
   b.mirrorX(m0.v, m0.i);
-  loftM(b, fus.rings(0.5, K), splitMat(K, 0, solid(COL.intake, MAT.METAL)), { capStart: true, capEnd: true });
+  loftM(b, fus.rings(0.3, K), splitMat(K, 0, solid(COL.intake, MAT.METAL)), { capStart: true, capEnd: true });
   // cowl front lip ring
   loftM(b, [fus.ring(-2.76, K, 0, TAU, true, 0.005), fus.ring(-2.76, K, 0, TAU, true, -0.06), fus.ring(-2.66, K, 0, TAU, true, -0.07)], solid(COL.spinGer, MAT.PLAIN));
   // cooling fan blades behind the cowl opening
@@ -708,7 +782,7 @@ function fw190() {
   fin.build(b, W, MAT.CAMO, W, MAT.CAMO);
   b.pop();
   for (const side of [-1, 1]) balken(b, (u, v, o = 0) => fus.side(u, v, side, 0.015 + o), 2.55, 0.02, 0.75);
-  const prof = spinner(b, 0, 0, -2.7, -3.3, 0.4, COL.spinGer, MAT.PLAIN, 12, 0.42);
+  const prof = spinner(b, 0, 0, -2.7, -3.3, 0.4, COL.spinGer, MAT.PLAIN, 18, 0.42);
   spinnerSpiral(b, 0, 0, -2.7, -3.3, prof);
   b.box(0, 0.55, 2.0, 0.025, 0.3, 0.08, W, MAT.CAMO);
   // ---- gear (wide track)
@@ -738,7 +812,7 @@ function fw190() {
 
 // ==================================================================== Ju 87 B Stuka
 function ju87() {
-  const b = new MeshBuilder(), g = new MeshBuilder(), K = 18;
+  const b = new MeshBuilder(), g = new MeshBuilder(), K = 24;
   const fus = new Body([
     [-3.95, 0.36, 0.36, 0.4, 0.1, 2.2], [-3.5, 0.45, 0.5, 0.58, 0.05, 2.4], [-2.6, 0.5, 0.58, 0.74, 0.0, 2.6],
     [-1.6, 0.52, 0.6, 0.78, 0, 2.7], [-0.6, 0.52, 0.62, 0.8, 0, 2.7], [0.8, 0.5, 0.6, 0.78, 0, 2.7],
@@ -775,7 +849,7 @@ function ju87() {
   { const a = wing.at(3.4); b.box(3.4, a.y - 0.16, a.z + 0.42 * a.chord, 0.08, 0.14, 0.55, W, MAT.UNDER); }
   for (let i = 0; i < 6; i++) { const z = -3.45 + i * 0.18, y = 0.18; stub(b, fus.side(z, y, 1)[0], y, z, 0.09, 0.07, 0.12, 0.25); }
   b.mirrorX(m0.v, m0.i);
-  loftM(b, fus.rings(0.5, K), splitMat(K, 15, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
+  loftM(b, fus.rings(0.3, K), splitMat(K, 15, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
   // chin radiator
   const rad = new Body([[-3.7, 0.3, 0.2, 0.3, -0.42, 3], [-3.4, 0.36, 0.2, 0.5, -0.5, 3], [-2.6, 0.38, 0.2, 0.48, -0.6, 3], [-1.9, 0.32, 0.2, 0.1, -0.7, 3]]);
   loftM(b, rad.rings(0.4, 8), underMat(solid(COL.intake, MAT.PLAIN)), { capStart: true });
@@ -794,7 +868,7 @@ function ju87() {
   // tailplane struts
   for (const s of [-1, 1]) bar(b, [s * 0.95, 0.32, 5.85], [s * 0.18, -0.12, 5.6], 0.025, W, MAT.UNDER, 4);
   for (const side of [-1, 1]) balken(b, (u, v, o = 0) => fus.side(u, v, side, 0.015 + o), 3.3, 0.1, 0.85);
-  const prof = spinner(b, 0, 0.1, -3.93, -4.4, 0.33, COL.spinGer, MAT.PLAIN, 14, 0.55);
+  const prof = spinner(b, 0, 0.1, -3.93, -4.4, 0.33, COL.spinGer, MAT.PLAIN, 18, 0.55);
   b.box(0, 0.75, 2.75, 0.025, 0.3, 0.08, W, MAT.CAMO);
   // ---- fixed spatted gear (in `gear`)
   const mg = g.mark();
@@ -829,7 +903,7 @@ function ju87() {
 
 // ==================================================================== Ju 88 A
 function ju88() {
-  const b = new MeshBuilder(), g = new MeshBuilder(), K = 18;
+  const b = new MeshBuilder(), g = new MeshBuilder(), K = 24;
   const fus = new Body([
     [-5.3, 0.06, 0.05, 0.06, 0.05, 2], [-5.15, 0.45, 0.42, 0.45, 0.02, 2], [-4.85, 0.66, 0.58, 0.63, 0, 2], [-4.5, 0.77, 0.67, 0.72, 0, 2.05], [-4.0, 0.81, 0.72, 0.77, 0, 2.1],
     [-3.5, 0.82, 0.74, 0.8, 0, 2.1], [-2.0, 0.8, 0.72, 0.8, 0, 2.1], [-0.5, 0.75, 0.65, 0.78, 0, 2.1], [1.5, 0.62, 0.58, 0.68, 0.02, 2.1],
@@ -853,11 +927,11 @@ function ju88() {
   balken(b, wing.proj(1), 7.4, wz(7.4), 1.35);
   balken(b, wing.proj(-1), 7.2, wz(7.2), 1.5);
   b.push(T(NX, 0, 0));
-  loftM(b, nac.rings(0.75, 12), splitMat(12, 10, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
+  loftM(b, nac.rings(0.35, 18), splitMat(18, 10, solid(COL.intake, MAT.PLAIN)), { capStart: true, capEnd: true });
   // annular radiator lip
-  loftM(b, [nac.ring(-3.63, 12, 0, TAU, true, 0.005), nac.ring(-3.63, 12, 0, TAU, true, -0.12), nac.ring(-3.5, 12, 0, TAU, true, -0.14)], solid([0.2, 0.21, 0.2], MAT.PLAIN));
+  loftM(b, [nac.ring(-3.63, 18, 0, TAU, true, 0.005), nac.ring(-3.63, 18, 0, TAU, true, -0.12), nac.ring(-3.5, 18, 0, TAU, true, -0.14)], solid([0.2, 0.21, 0.2], MAT.PLAIN));
   b.pop();
-  spinner(b, NX, NY, -3.6, -4.25, 0.3, COL.spinGer, MAT.PLAIN, 14, 0.5);
+  spinner(b, NX, NY, -3.6, -4.25, 0.3, COL.spinGer, MAT.PLAIN, 18, 0.5);
   for (const side of [-1, 1]) for (let i = 0; i < 4; i++) {
     const z = -2.95 + i * 0.24, y = NY + 0.15;
     const p = nac.side(z, y, side);
@@ -868,7 +942,7 @@ function ju88() {
   for (const x of [1.45, 4.25]) { const a = wing.at(x); b.box(x, a.y - 0.2, a.z + 0.4 * a.chord, 0.09, 0.2, 0.75, W, MAT.UNDER); }
   b.mirrorX(m0.v, m0.i);
   // fuselage with glazed "beetle eye" nose
-  loftM(b, fus.rings(0.62, K), (r, k, p, cap) => (p[2] < -4.5 ? [1, 1, 1, MAT.GLASS] : splitMat(K, 10)(r, k, p, cap)), { capEnd: true });
+  loftM(b, fus.rings(0.3, K), (r, k, p, cap) => (p[2] < -4.5 ? [1, 1, 1, MAT.GLASS] : splitMat(K, 10)(r, k, p, cap)), { capEnd: true });
   for (let i = 0; i < 8; i++) {
     const th = (i / 8) * TAU + PI / 8, pts = [];
     for (let j = 0; j <= 3; j++) pts.push(fus.pt(lerp(-4.5, -5.25, j / 3), th, 0.012));
