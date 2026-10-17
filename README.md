@@ -59,7 +59,7 @@ Source: GitHub Actions**. All paths are relative, so the game works from the `ht
 | Cockpit look | Move the mouse toward the screen edges to turn your head (sides = along the wings, far edge = over your shoulder, top = up); centre = straight ahead. **Z / X** look left / right, **F** check six, **V** padlock the target |
 | T | Next target (the red diamond is the gun lead point) |
 | 1 / 2 / 3 | Wingmen: attack my target / form up on me / engage at will |
-| G | Gear (automatic by default) · land on your own runway and stop to rearm and repair |
+| G | Gear (automatic by default) · land on your own runway and stop to rearm and repair (hold **S** to brake; closing the throttle also brakes) |
 | Tab | Big map · **N** newsreel film look · **R** radio voices on/off · **O** sound · **P / Esc** pause · **`** performance overlay |
 
 ### Gamepad (DualShock 4 / DualSense / Xbox)

@@ -192,7 +192,8 @@ export class Aircraft {
     const L = G * (V / vs) * (V / vs) * CL * 1.15;      // + ground effect
     // longitudinal
     const Th = this.thrustAccel(Math.max(V, 1)) * (V < 22 ? V / 22 * 0.5 + 0.5 : 1);
-    const roll = 0.15 + (ctl.brake || (ctl.throttle < 0.05 && this.landedAt !== undefined) ? 3.8 : 0);
+    // rolling resistance + wheel brakes (the AI brakes by closing the throttle after landing)
+    const roll = 0.4 + (ctl.brake || (ctl.throttle < 0.05 && this.landedAt !== undefined) ? 3.8 : 0);
     const D = T.cd0 * V * V * (1 + 0.35 * this.gear) + roll;
     V = Math.max(0, V + (Th - D) * dt);
     // steering

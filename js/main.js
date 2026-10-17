@@ -452,7 +452,8 @@ class Game {
     ctl.boost = inp.down('ShiftLeft', 'ShiftRight') || inp.padBtn(PAD.L3);
     ctl.fire = (inp.mouse.buttons & 1) !== 0 || inp.down('Space', 'ControlLeft') || inp.padVal(PAD.R2) > 0.4;
     ctl.bomb = (inp.mouse.buttons & 4) !== 0 || inp.down('KeyB') || inp.padBtn(PAD.CROSS) || inp.padVal(PAD.L2) > 0.4;
-    ctl.brake = this.throttle < 0.05;
+    // wheel brakes: throttle closed (bar near empty), or S / D-pad down held while on the ground
+    ctl.brake = this.throttle < 0.12 || (p.state === 'ground' && (inp.down('KeyS') || inp.padBtn(PAD.DOWN)));
   }
 
   // ---------------------------------------------------------------- main loop
@@ -1095,7 +1096,7 @@ class Game {
       if (low && !(p.state === 'ground' && onHome && p.speed < 3)) {
         const H = S.homeV || (S.homeV = {});
         H.x = f.x; H.z = f.z; H.y = this.world.groundAt(f.x, f.z); H.name = f.name;
-        if (p.state === 'ground' && onHome) { H.stage = 'roll'; H.text = 'STOP ON THE AIRFIELD TO REARM'; }
+        if (p.state === 'ground' && onHome) { H.stage = 'roll'; H.text = `HOLD ${this.input.pad ? 'D-PAD DOWN' : 'S'} TO BRAKE - STOP ON THE AIRFIELD TO REARM`; }
         else if (onHome || Math.hypot(p.pos.x - f.x, p.pos.z - f.z) < 3000) { H.stage = 'near'; H.text = 'LAND AND STOP ON THE AIRFIELD TO REARM'; }
         else { H.stage = 'far'; H.text = `RETURN TO ${f.name} TO REARM`; }
         S.home = H;

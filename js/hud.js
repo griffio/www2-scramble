@@ -165,7 +165,7 @@ export class HUD {
     g.fillStyle = AMBER_D; g.font = `600 12px ${FONT}`;
     g.fillText(`HDG ${String(Math.round(p.compass * 57.2958) % 360).padStart(3, '0')}`, x0 + 12, y0 + 118);
     g.fillText(`G ${p.nz.toFixed(1)}`, x0 + 90, y0 + 118);
-    g.fillText(p.gear > 0.5 ? 'GEAR DN' : '', x0 + 150, y0 + 118);
+    g.fillText(p.state === 'ground' && p.ctl.brake && p.speed > 0.5 ? 'BRAKES' : p.gear > 0.5 ? 'GEAR DN' : '', x0 + 150, y0 + 118);
     // damage + weapons panel (bottom centre)
     const cx = W / 2, by = H - 64;
     const hp = clamp(p.hp / T.hp, 0, 1);
