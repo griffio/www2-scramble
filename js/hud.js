@@ -66,6 +66,7 @@ export class HUD {
     if (!S.hidden) {
       if (S.player && S.player.alive) this.flightHud(S);
       this.markers(S);
+      this.homeField(S);
       this.statusBar(S);
       this.minimap(S);
     }
@@ -195,12 +196,12 @@ export class HUD {
     if (p.state === 'air' && p.speed < p.type.vs * 1.1) w.push('STALL');
     if (p.boostHeat > 0.92) w.push('OVERHEAT');
     if (S.outOfBounds) w.push('RETURN TO THE BATTLE AREA');
-    if (S.serviceT > 0) w.push(S.serviceT < 4 ? `GROUND CREW REARMING ${Math.ceil(4 - S.serviceT)}` : 'REARMED - READY');
+    if (S.serviceT > 0) w.push(S.serviceT < 4 ? `GROUND CREW REARMING ${Math.ceil(4 - S.serviceT)}` : S.towWait === 'traffic' ? 'REARMED - WAITING FOR TAKE-OFF TRAFFIC' : S.towWait === 'runway' ? 'REARMED - RUNWAY UNSERVICEABLE' : 'REARMED - READY');
     if (!w.length) return;
     const blink = Math.sin(performance.now() / 120) > -0.3;
     g.font = `700 22px ${FONT}`; g.textAlign = 'center';
     w.forEach((t, i) => {
-      if (!blink && t !== 'REARMED - READY' && !t.startsWith('GROUND')) return;
+      if (!blink && !t.startsWith('REARMED') && !t.startsWith('GROUND')) return;
       g.fillStyle = t.startsWith('GROUND') || t.startsWith('REARMED') ? 'rgba(150,230,140,0.95)' : RED;
       g.fillText(t, W / 2, H * 0.3 + i * 28);
     });
@@ -262,6 +263,34 @@ export class HUD {
       const s = clamp(2500 / d, 4, 10);
       g.beginPath(); g.moveTo(o.x, o.y - s); g.lineTo(o.x + s, o.y); g.lineTo(o.x, o.y + s); g.lineTo(o.x - s, o.y); g.closePath(); g.stroke();
       if (d < 4000) { g.fillStyle = 'rgba(255,200,90,0.8)'; g.fillText(t.kind === 'hangar' ? 'HANGAR' : 'RUNWAY', o.x, o.y - s - 4); }
+    }
+  }
+
+  // rearm prompt and a marker on the home airfield (only while low on ammo / bombs, or damaged)
+  homeField(S) {
+    const h = S.home;
+    if (!h || !S.player) return;
+    const g = this.g, W = this.W, H = this.H, o = { x: 0, y: 0 }, col = 'rgba(140,200,255,0.95)';
+    g.textAlign = 'center'; g.font = `700 14px ${FONT}`; g.fillStyle = col;
+    g.fillText(h.text, W / 2, 104);
+    if (h.stage === 'roll') return;
+    const rx = h.x - S.cam.x, ry = h.y + 10 - S.cam.y, rz = h.z - S.cam.z, d = Math.hypot(rx, ry, rz);
+    const label = `${h.name} ${d < 1000 ? Math.round(d) + 'm' : (d / 1000).toFixed(1) + 'km'}`;
+    g.font = `600 11px ${FONT}`; g.strokeStyle = col; g.lineWidth = 1.5;
+    if (this.proj(S.vp, rx, ry, rz, o) && o.x > 0 && o.x < W && o.y > 0 && o.y < H) {
+      const s = clamp(4000 / d, 7, 14);
+      g.beginPath(); g.arc(o.x, o.y, s, 0, Math.PI * 2); g.moveTo(o.x - s * 1.6, o.y); g.lineTo(o.x + s * 1.6, o.y); g.stroke();
+      g.fillText(label, o.x, o.y - s - 6);
+    } else {
+      // edge arrow toward the field
+      const sxv = rx * S.camRight.x + ry * S.camRight.y + rz * S.camRight.z;
+      const syv = rx * S.camUp.x + ry * S.camUp.y + rz * S.camUp.z;
+      const ang = Math.atan2(-syv, sxv), R = Math.min(W, H) * 0.42;
+      const x = W / 2 + Math.cos(ang) * R, y = H / 2 + Math.sin(ang) * R;
+      g.save(); g.translate(x, y); g.rotate(ang);
+      g.fillStyle = col; g.beginPath(); g.moveTo(14, 0); g.lineTo(-6, -9); g.lineTo(-2, 0); g.lineTo(-6, 9); g.closePath(); g.fill();
+      g.restore();
+      g.fillText(label, x, y + 22);
     }
   }
 

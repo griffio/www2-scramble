@@ -594,6 +594,8 @@ class Game {
           this.hud.radio(e.text, e.cls);
           this.say(e.voice, e.text, e.cls);
           break;
+        case 'fade': this.fade(); break;
+        case 'towed': if (play) { this.chaseInit = false; this.hud.radio('TOWED TO THE RUNWAY - CLEARED FOR TAKE-OFF', 'good'); } break;
         case 'playerhit': this.dmgFlash = Math.min(0.8, (this.dmgFlash || 0) + e.dmg * 0.04); break;
         case 'playerdown': if (play) { this.hud.big('SHOT DOWN', 'You bail out over the Channel...', 3, 'rgba(255,90,60,0.95)'); A.ui('defeat'); this.say('player_down'); } break;
       }
@@ -1084,6 +1086,21 @@ class Game {
     S.hidden = (this.state !== 'play' && this.state !== 'ending') || !!this.debugCam;   // debug camera: clean shots
     S.vp = this.R.vp; S.cam = cam.pos; S.aircraft = sim.aircraft; S.team = sim.playerTeam;
     S.player = this.state === 'play' || this.state === 'ending' ? p : null;
+    // rearm prompt: low on ammo or bombs, or damaged -> point the player at the home field
+    S.home = null;
+    if (S.player && p.alive) {
+      const T = p.type, f = sim.teams[sim.playerTeam].field;
+      const low = p.ammo[0] < T.volleys[0].ammo * 0.25 || (T.bombs && !p.bombs) || p.hp < T.hp * 0.6 || p.engineDmg > 0.3;
+      const onHome = this.world.inField(p.pos.x, p.pos.z) === f;
+      if (low && !(p.state === 'ground' && onHome && p.speed < 3)) {
+        const H = S.homeV || (S.homeV = {});
+        H.x = f.x; H.z = f.z; H.y = this.world.groundAt(f.x, f.z); H.name = f.name;
+        if (p.state === 'ground' && onHome) { H.stage = 'roll'; H.text = 'STOP ON THE AIRFIELD TO REARM'; }
+        else if (onHome || Math.hypot(p.pos.x - f.x, p.pos.z - f.z) < 3000) { H.stage = 'near'; H.text = 'LAND AND STOP ON THE AIRFIELD TO REARM'; }
+        else { H.stage = 'far'; H.text = `RETURN TO ${f.name} TO REARM`; }
+        S.home = H;
+      }
+    }
     qrot(cam.q, 1, 0, 0, S.camRight); qrot(cam.q, 0, 1, 0, S.camUp);
     S.mouseAim = this.mouseAim;
     S.needClick = this.state === 'play' && this.mouseAim && !this.input.mouse.locked && !this.paused && !!p && p.alive && !this.autopilot;
@@ -1102,6 +1119,7 @@ class Game {
         S.ccip = S.ccipV || (S.ccipV = new V3()); S.ccip.set(x, this.world.groundAt(x, z), z);
       } else S.ccip = null;
       S.serviceT = p.state === 'ground' && p.speed < 3 && p.landedAt !== undefined ? p.serviceT || 0 : 0;
+      S.towWait = p.towWait;
       S.outOfBounds = Math.abs(p.pos.x) > MAP_HALF || Math.abs(p.pos.z) > MAP_HALF;
     }
     S.groundTargets = [];
@@ -1154,6 +1172,13 @@ class Game {
         A.whiz(w, k === 'cannon' || k === 'aa', miss);
       }
     }
+  }
+
+  // brief fade to black and back (covers jumps such as the tow to the runway)
+  fade() {
+    const el = $('#fade');
+    el.classList.add('on');
+    clearTimeout(this.fadeT); this.fadeT = setTimeout(() => el.classList.remove('on'), 750);
   }
 
   dynamicResolution(dt) {

@@ -701,19 +701,36 @@ export class Sim {
     }
   }
 
-  // landing back at base: rearm and repair the player's aircraft
+  // landing back at base: rearm and repair the player's aircraft, then tow it to the take-off point
   playerServices(dt) {
     const p = this.player;
-    if (!p || p.state !== 'ground') { if (p) p.serviceT = 0; return; }
+    if (!p) return;
+    // moving again (or airborne): the next stop on a home field is a new service
+    if (p.state !== 'ground' || p.speed > 5) p.serviced = p.towed = false;
+    p.towWait = null;
+    if (p.state !== 'ground') { p.serviceT = 0; return; }
     const f = this.world.inField(p.pos.x, p.pos.z);
     if (!f || f.team !== p.team || p.speed > 3 || p.landedAt === undefined) { p.serviceT = 0; return; }
     p.serviceT = (p.serviceT || 0) + dt;
     if (p.serviceT > 4 && !p.serviced) {
-      p.serviced = true;
+      p.serviced = true; p.towed = false; p.towT = 0;
       p.hp = p.type.hp; p.ammo = p.type.volleys.map((v) => v.ammo); p.bombs = p.type.bombs; p.engineDmg = 0; p.fire = 0; p.smoke = 0;
       this.radio(-1, 'GROUND CREW: REARMED, REFUELLED AND PATCHED UP. GOOD HUNTING, SIR!', 'good', 'rearmed');
     }
-    if (p.speed > 5) p.serviced = false;
+    // a moment later: towed onto the runway centreline at the take-off point, if the runway works and is clear
+    if (p.serviced && !p.towed && p.serviceT > 5.2) {
+      const u = this.runwayStart(f);
+      if (u === null || !this.runwayOpen(f)) { p.towWait = 'runway'; return; }
+      const [x, z] = fieldToWorld(f, u, 0);
+      if (Math.hypot(p.pos.x - x, p.pos.z - z) < 60) { p.towed = true; return; }   // already there
+      if (this.aircraft.some((a) => a !== p && a.state === 'ground' && Math.hypot(a.pos.x - x, a.pos.z - z) < 40)) { p.towWait = 'traffic'; return; }
+      if (!p.towT) { p.towT = this.time; this.ev({ t: 'fade' }); }   // the screen fades out first
+      else if (this.time - p.towT > 0.4) {
+        p.placeOnRunway(x, z, f.hdg, this.world.groundAt(x, z));
+        p.towed = true;
+        this.ev({ t: 'towed' });
+      }
+    }
   }
 
   // ---------------------------------------------------------------- the commanders
