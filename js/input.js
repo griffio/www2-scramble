@@ -94,7 +94,9 @@ export class Input {
   }
   // the controller in use: the most recently touched one if several are connected
   pollPad() {
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let pads = [];
+    try { pads = (navigator.getGamepads && navigator.getGamepads()) || []; }   // throws where the gamepad permissions policy forbids it (some iframes)
+    catch (e) { if (!this.padErr) { this.padErr = true; console.warn('[input] gamepad API unavailable: ' + e.message); } }
     let pad = null;
     for (const p of pads) if (p && p.connected && (!pad || p.timestamp > pad.timestamp)) pad = p;
     if (pad && pad.mapping !== 'standard' && !this.warned) { this.warned = true; console.warn(`[input] gamepad "${pad.id}" has no standard mapping; buttons may be mixed up`); }

@@ -59,7 +59,7 @@ Source: GitHub Actions**. All paths are relative, so the game works from the `ht
 | Cockpit look | Move the mouse toward the screen edges to turn your head (sides = along the wings, far edge = over your shoulder, top = up); centre = straight ahead. **Z / X** look left / right, **F** check six, **V** padlock the target |
 | T | Next target (the red diamond is the gun lead point) |
 | 1 / 2 / 3 | Wingmen: attack my target / form up on me / engage at will |
-| G | Gear (automatic by default) · land on your own runway and stop to rearm and repair (hold **S** to brake; closing the throttle also brakes) |
+| G | Gear and flaps (automatic by default: they come down together when you approach your own airfield low and slow, below about 2,000 ft over the runway) · land and stop to rearm and repair (hold **S** to brake; closing the throttle also brakes). The altimeter reads height above the ground, and a landing checklist appears on approach: gear, speed, sink rate, wings level |
 | Tab | Big map · **N** newsreel film look · **R** radio voices on/off · **O** sound · **P / Esc** pause · **`** performance overlay |
 
 ### Gamepad (DualShock 4 / DualSense / Xbox)
@@ -91,7 +91,9 @@ from the controller, the sound comes on with the first click or key press.
 * **Arcade flight model** (`js/flight.js`): the stick commands body rates and a released stick holds
   attitude, on top of a point-mass with power-limited thrust, parasite and induced drag, AoA lift with a
   stall, and side force. Corner speed, energy bleed in hard turns, zoom climbs, stalls and the Stuka's
-  dive brakes all fall out of the physics. Taildragger ground handling, tail-down attitude, auto gear.
+  dive brakes all fall out of the physics. Taildragger ground handling, tail-down attitude, auto gear with
+  gear-linked landing flaps (lower stall speed, lots of drag), ground effect, and a landed aircraft that
+  stays on its wheels until you open up and pull for a go-around.
 * **AI** (`js/ai.js`): every AI aircraft is flown through the same stick inputs as yours by a bank-to-turn
   controller. Behaviours: take-off, formation (velocity matching), escort, CAP, intercept, gun lead pursuit
   with skill-based aim wobble, break turns when someone is on their tail, level bombing with an impact
@@ -120,6 +122,7 @@ from the controller, the sound comes on with the first click or key press.
 ```sh
 node tools/battle.mjs normal 30 4   # headless AI-vs-AI battles: outcome, losses, kill matrix, sim speed
 node tools/fmtest.mjs               # flight model: top speed, climb, turn, take-off run per type
+node tools/landtest.mjs             # landing: scripted idle approaches to Hawkinge must all end stopped on the wheels
 ```
 `tools/modelview.html` previews every procedural model; `tools/audiotest.html` plays every sound.
 `node tools/make-engine-loops.mjs` rebuilds the engine loops in `audio/` from the original recordings (needs ffmpeg).

@@ -67,6 +67,7 @@ export class HUD {
       if (S.player && S.player.alive) this.flightHud(S);
       this.markers(S);
       this.homeField(S);
+      this.approach(S);
       this.statusBar(S);
       this.minimap(S);
     }
@@ -151,7 +152,7 @@ export class HUD {
     g.fillText('AIRSPEED', x0 + 12, y0 + 20); g.fillText('ALTITUDE', x0 + 126, y0 + 20);
     g.font = `600 30px ${FONT}`; g.fillStyle = AMBER;
     g.fillText(`${Math.round(p.speed * 2.237)}`, x0 + 12, y0 + 52);
-    g.fillText(`${Math.round(Math.max(0, p.pos.y) * 3.281 / 10) * 10}`, x0 + 126, y0 + 52);
+    g.fillText(`${Math.round(Math.max(0, (p.agl ?? p.pos.y) - p.gearH0) * 3.281 / 10) * 10}`, x0 + 126, y0 + 52);   // height above the ground
     g.font = `600 12px ${FONT}`; g.fillStyle = AMBER_D;
     g.fillText('MPH', x0 + 80, y0 + 52); g.fillText('FT', x0 + 208, y0 + 52);
     // throttle / boost
@@ -165,7 +166,7 @@ export class HUD {
     g.fillStyle = AMBER_D; g.font = `600 12px ${FONT}`;
     g.fillText(`HDG ${String(Math.round(p.compass * 57.2958) % 360).padStart(3, '0')}`, x0 + 12, y0 + 118);
     g.fillText(`G ${p.nz.toFixed(1)}`, x0 + 90, y0 + 118);
-    g.fillText(p.state === 'ground' && p.ctl.brake && p.speed > 0.5 ? 'BRAKES' : p.gear > 0.5 ? 'GEAR DN' : '', x0 + 150, y0 + 118);
+    g.fillText(p.state === 'ground' && p.ctl.brake && p.speed > 0.5 ? 'BRAKES' : p.gear > 0.5 ? (p.flap > 0.5 ? 'GEAR+FLAPS' : 'GEAR DN') : '', x0 + 150, y0 + 118);
     // damage + weapons panel (bottom centre)
     const cx = W / 2, by = H - 64;
     const hp = clamp(p.hp / T.hp, 0, 1);
@@ -193,7 +194,7 @@ export class HUD {
     const g = this.g, p = S.player, W = this.W, H = this.H;
     const w = [];
     if (p.state === 'air' && p.agl < 120 && p.vel.y < -12 && p.agl / -p.vel.y < 4) w.push('PULL UP!');
-    if (p.state === 'air' && p.speed < p.type.vs * 1.1) w.push('STALL');
+    if (p.state === 'air' && p.speed < p.vsNow * 1.1) w.push('STALL');
     if (p.boostHeat > 0.92) w.push('OVERHEAT');
     if (S.outOfBounds) w.push('RETURN TO THE BATTLE AREA');
     if (S.serviceT > 0) w.push(S.serviceT < 4 ? `GROUND CREW REARMING ${Math.ceil(4 - S.serviceT)}` : S.towWait === 'traffic' ? 'REARMED - WAITING FOR TAKE-OFF TRAFFIC' : S.towWait === 'runway' ? 'REARMED - RUNWAY UNSERVICEABLE' : 'REARMED - READY');
@@ -291,6 +292,31 @@ export class HUD {
       g.fillStyle = col; g.beginPath(); g.moveTo(14, 0); g.lineTo(-6, -9); g.lineTo(-2, 0); g.lineTo(-6, 9); g.closePath(); g.fill();
       g.restore();
       g.fillText(label, x, y + 22);
+    }
+  }
+
+  // landing checklist (whenever the gear is coming down near the home field) and the runway threshold
+  approach(S) {
+    const A = S.approach;
+    if (!A || !S.player) return;
+    const g = this.g, W = this.W, H = this.H, o = { x: 0, y: 0 }, y = H - 84, sep = '   \u00b7   ';   // just above the weapons panel, clear of the radio log
+    g.font = `700 13px ${FONT}`; g.textAlign = 'left';
+    const sw = g.measureText(sep).width;
+    let total = sw * (A.items.length - 1);
+    const ws = A.items.map((it) => { const w = g.measureText(it.t).width; total += w; return w; });
+    let x = W / 2 - total / 2;
+    A.items.forEach((it, i) => {
+      if (i) { g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillText(sep, x, y); x += sw; }
+      g.fillStyle = it.ok ? 'rgba(150,230,140,0.95)' : RED; g.fillText(it.t, x, y); x += ws[i];
+    });
+    if (A.hasThr) {
+      const rx = A.thr.x - S.cam.x, ry = A.thr.y + 2 - S.cam.y, rz = A.thr.z - S.cam.z;
+      if (this.proj(S.vp, rx, ry, rz, o) && o.x > 0 && o.x < W && o.y > 0 && o.y < H) {
+        const col = 'rgba(140,200,255,0.95)';
+        g.strokeStyle = col; g.lineWidth = 1.5;
+        g.beginPath(); g.moveTo(o.x - 8, o.y - 14); g.lineTo(o.x + 8, o.y - 14); g.lineTo(o.x, o.y - 2); g.closePath(); g.stroke();
+        g.font = `600 11px ${FONT}`; g.textAlign = 'center'; g.fillStyle = col; g.fillText('THRESHOLD', o.x, o.y - 18);
+      }
     }
   }
 

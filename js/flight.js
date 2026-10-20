@@ -2,6 +2,9 @@
 // holds attitude) on top of a simple but physical point-mass: thrust from power (falls with
 // speed), parasite + induced drag, lift from angle of attack with a stall, side force from
 // sideslip. Corner speed, energy bleed in hard turns, zoom climbs and stalls all emerge.
+// Landing: gear and split flaps (big drag, extra lift, lower stall speed) come down together in
+// "landing mode" (latched near the home runway; see stepAir), a little ground effect cushions the
+// flare, and a landed aircraft stays on its wheels until the pilot asks for a go-around.
 import { V3, Quat, qrot, qrotInv, clamp, lerp, smoothstep, G, DEG, wrapPi } from './math.js';
 
 const ALPHA_STALL = 16 * DEG;
@@ -18,6 +21,8 @@ export class Aircraft {
     this.rpm = 0.3; this.boostHeat = 0;
     this.hp = type.hp; this.state = 'air';
     this.gear = 1; this.gearAuto = true;
+    this.flap = 0; this.flapDown = false; this.landing = false; this.landingCool = 0;   // flaps follow the gear in landing mode
+    this.vsNow = type.vs;                                        // stall speed in the current configuration
     this.groundPitch = 0; this.heading = 0;
     this.alpha = 0; this.beta = 0; this.nz = 1; this.speed = 0; this.stall = 0;
     this.engineDmg = 0; this.fire = 0; this.smoke = 0;
@@ -43,7 +48,8 @@ export class Aircraft {
     this.q.setHPR(hdg, this.groundPitch, 0);
     this.pos.set(x, groundY + this.gearH0, z);
     this.vel.set(0, 0, 0); this.w.set(0, 0, 0);
-    this.gear = 1; this.rpm = 0.6; this.speed = 0;
+    this.gear = 1; this.gearUp = false; this.rpm = 0.6; this.speed = 0;
+    this.flap = 0; this.flapDown = false; this.landing = false; this.landedAt = undefined;
     this.updateBasis();
   }
   placeInAir(x, y, z, hdg, speed) {
@@ -52,7 +58,8 @@ export class Aircraft {
     this.pos.set(x, y, z);
     this.updateBasis();
     this.vel.copy(this.fwd).scale(speed);
-    this.gear = 0; this.rpm = 1; this.speed = speed;
+    this.gear = 0; this.gearUp = true; this.rpm = 1; this.speed = speed;
+    this.flap = 0; this.flapDown = false; this.landing = false;
   }
   updateBasis() {
     qrot(this.q, 0, 0, -1, this.fwd); qrot(this.q, 0, 1, 0, this.up); qrot(this.q, 1, 0, 0, this.right);
@@ -91,7 +98,13 @@ export class Aircraft {
     const alpha = Math.atan2(-_v.y, -_v.z), beta = Math.atan2(_v.x, -_v.z);
     this.alpha = alpha; this.beta = beta;
     const qbar = (V / vs) * (V / vs);
-    const eff = clamp((V - 0.45 * vs) / (0.8 * vs), 0.1, 1);
+    // flaps: more lift at a given angle of attack (so a lower stall speed) and a lot more drag
+    const flap = this.flap, clFlap = 1 + 0.3 * flap;
+    const vsEff = vs / Math.sqrt(clFlap);
+    this.vsNow = vsEff;
+    // ground effect within a wingspan or so of the ground: a bit more lift, less induced drag
+    const ge = world ? 1 - smoothstep(3, 16, this.agl ?? 1e9) : 0;
+    const eff = clamp((V - 0.45 * vsEff) / (0.8 * vsEff), 0.1, 1);
     const hiSpeed = V > 150 ? Math.max(0.45, 1 - (V - 150) / 160) : 1;     // stiff controls in a fast dive
     // ---------------------------------------------------------- rotation
     let cp = ctl.pitch, cr = ctl.roll, cy = ctl.yaw;
@@ -102,7 +115,7 @@ export class Aircraft {
     const qmax = (cp >= 0 ? nPos : nNeg) * G / Math.max(V, 25) + 0.08;
     let qc = cp * qmax * hiSpeed;
     // stall: the nose drops toward the flight path, wings rock
-    const stall = Math.max(smoothstep(0.9 * ALPHA_STALL, 1.4 * ALPHA_STALL, Math.abs(alpha)), 1 - smoothstep(0.65 * vs, 0.95 * vs, V));
+    const stall = Math.max(smoothstep(0.9 * ALPHA_STALL, 1.4 * ALPHA_STALL, Math.abs(alpha)), 1 - smoothstep(0.65 * vsEff, 0.95 * vsEff, V));
     this.stall = stall;
     qc += -alpha * 2.2 * stall;
     let rc = -cr * T.roll * eff * hiSpeed;
@@ -119,7 +132,7 @@ export class Aircraft {
     // lift
     const a = alpha / ALPHA_STALL;
     let CL = Math.abs(a) <= 1 ? a : Math.sign(a) * Math.max(0.4, 1 - (Math.abs(a) - 1) * 0.9);
-    let L = G * qbar * CL;
+    let L = G * qbar * CL * clFlap * (1 + 0.1 * ge);
     const Lmax = T.gmax * G * 1.08;
     if (L > Lmax) L = Lmax; else if (L < -Lmax * 0.5) L = -Lmax * 0.5;
     const ud = this.up.x * vx + this.up.y * vy + this.up.z * vz;
@@ -131,10 +144,13 @@ export class Aircraft {
     const n = L / G;
     this.nz = n;
     // drag
-    const gearDrag = this.gear * 0.35, brake = this.diveBrake * 2.6 + (this.state === 'down' ? 1.5 : 0);
-    const Dp = T.cd0 * V * V * (1 + gearDrag + brake);
-    const Di = T.ki * n * n / Math.max(V * V, 300) + T.ki * 0.6 * (beta * beta) * 10 / Math.max(V * V, 300) * qbar;
-    const D = Dp + Di;
+    const brake = this.diveBrake * 2.6 + (this.state === 'down' ? 1.5 : 0);
+    const Dp = T.cd0 * V * V * (1 + this.gear * 0.35 + brake);
+    const Di = (T.ki * n * n / Math.max(V * V, 300)) * (1 - 0.35 * ge) + T.ki * 0.6 * (beta * beta) * 10 / Math.max(V * V, 300) * qbar;
+    // the undercarriage and the barn-door flaps: drag that matters at approach speed (per unit of qbar,
+    // so it scales with the aircraft's own stall speed rather than its tiny clean cd0)
+    const Dl = (this.gear * 0.12 + flap * 0.3) * qbar;
+    const D = Dp + Di + Dl;
     const Th = this.thrustAccel(V);
     const ax = _ld.x * L - _sd.x * sideK - vx * D + this.fwd.x * Th;
     const ay = _ld.y * L - _sd.y * sideK - vy * D + this.fwd.y * Th - G;
@@ -147,10 +163,25 @@ export class Aircraft {
       const agl = this.pos.y - gh;
       this.agl = agl;
       if (this.gearAuto && this.state === 'air') {
-        if (this.gear > 0 && agl > 25 && V > vs * 1.25) this.gearUp = true;
-        if (this.gearUp && agl < 60 && V < vs * 1.55 && world.onRunway(this.pos.x, this.pos.z, 900)) this.gearUp = false;
+        // landing mode latches when the aircraft comes in low and not too fast over its own airfield;
+        // it unlatches on a go-around (climbing away, or back above 300 m / 3 km out), never frame to frame
+        if (!this.landing) {
+          this.landingCool = Math.max(0, this.landingCool - dt);
+          if (this.landingCool <= 0 && agl < 200 && V < vs * 2.3 && this.vel.y < 3) {
+            const rw = world.onRunway(this.pos.x, this.pos.z, 1500);
+            if (rw && rw.field.team === this.team) this.landing = true;
+          }
+        } else if (agl > 300 || (this.vel.y > 4 && agl > 60 && V > vs * 1.3) || !world.onRunway(this.pos.x, this.pos.z, 3000)) {
+          this.landing = false; this.landingCool = 12;   // gear stays up for a while after a go-around
+        }
+        if (this.landing) this.gearUp = false;
+        else if (this.gear > 0 && agl > 25 && V > vs * 1.25) this.gearUp = true;
+        this.flapDown = this.landing;
       }
       this.gear = clamp(this.gear + (this.gearUp ? -dt / 3 : dt / 3), 0, 1);
+      // flaps follow the gear down (below the flap limit speed) and come up with it
+      const flapOut = this.flapDown && !this.gearUp && V < vs * 2.2;
+      this.flap = clamp(this.flap + (flapOut ? dt / 2.5 : -dt / 2.5), 0, 1);
       // lowest point: main / tail wheel with the gear down, else the belly
       let low = -1.1;
       if (this.gear > 0.95) {
@@ -166,7 +197,7 @@ export class Aircraft {
     const V = this.speed, sink = -this.vel.y;
     const bank = Math.abs(this.bankAngle), pitch = this.pitchAngle;
     const okSurface = gh > 0.3 && world.slopeAt(this.pos.x, this.pos.z) > 0.985;
-    if (this.state === 'air' && this.gear > 0.95 && okSurface && sink < 5.5 && bank < 18 * DEG && pitch > -4 * DEG && pitch < 22 * DEG && V < this.type.vs * 2.2 && this.up.y > 0.8) {
+    if (this.state === 'air' && this.gear > 0.95 && okSurface && sink < 7 && bank < 22 * DEG && pitch > -5 * DEG && pitch < 22 * DEG && V < this.type.vs * 2.2 && this.up.y > 0.8) {
       this.state = 'ground';
       this.heading = this.compass;
       this.groundPitch = clamp(pitch, 0, this.groundPitch0);
@@ -183,18 +214,24 @@ export class Aircraft {
     const gh = world.groundAt(this.pos.x, this.pos.z);
     let V = this.speed;
     // tail comes up as speed builds; the pilot rotates past ~0.95 Vs
+    const landed = this.landedAt !== undefined;
+    // flaps: stay out through the landing roll (drag), never out for a take-off
+    if (!landed) this.flapDown = false;
+    this.flap = clamp(this.flap + (this.flapDown ? dt / 2.5 : -dt / 2.5), 0, 1);
+    const clFlap = 1 + 0.3 * this.flap;
+    this.vsNow = vs / Math.sqrt(clFlap);
     const tailUp = smoothstep(0.3 * vs, 0.75 * vs, V);
     let target = this.groundPitch0 * (1 - tailUp);
-    if (ctl.pitch > 0.05 && V > vs * 0.92) target = this.groundPitch0 + 3 * DEG;
+    if (ctl.pitch > 0.05 && V > this.vsNow * 0.92) target = this.groundPitch0 + 3 * DEG;
     this.groundPitch += clamp(target - this.groundPitch, -0.25 * dt, 0.18 * dt);
     // lift at this attitude
     const CL = clamp(this.groundPitch / ALPHA_STALL, -1, 1);
-    const L = G * (V / vs) * (V / vs) * CL * 1.15;      // + ground effect
+    const L = G * (V / vs) * (V / vs) * CL * clFlap * 1.15;      // + ground effect
     // longitudinal
     const Th = this.thrustAccel(Math.max(V, 1)) * (V < 22 ? V / 22 * 0.5 + 0.5 : 1);
     // rolling resistance + wheel brakes (the AI brakes by closing the throttle after landing)
     const roll = 0.4 + (ctl.brake || (ctl.throttle < 0.05 && this.landedAt !== undefined) ? 3.8 : 0);
-    const D = T.cd0 * V * V * (1 + 0.35 * this.gear) + roll;
+    const D = T.cd0 * V * V * (1 + 0.35 * this.gear) + (0.12 + 0.3 * this.flap) * (V / vs) * (V / vs) + roll;
     V = Math.max(0, V + (Th - D) * dt);
     // steering
     const steer = clamp(ctl.yaw + ctl.roll * 0.8, -1, 1);
@@ -212,11 +249,14 @@ export class Aircraft {
     this.w.set(0, 0, 0);
     // rough ground at speed
     if (V > 18 && world.slopeAt(this.pos.x, this.pos.z) < 0.97) { this.crash('ground'); return; }
-    if (L > G) {   // airborne
+    // airborne: a landed aircraft stays down (no bouncing back into the air at touchdown) unless the
+    // pilot opens up and pulls for a go-around
+    if (L > G && (!landed || (ctl.pitch > 0.05 && ctl.throttle > 0.5))) {
       this.state = 'air';
       this.w.x = 0.05;
       this.vel.y = 1.0;
       this.landedAt = undefined;
+      this.landing = false; this.flapDown = false;
     }
   }
 }

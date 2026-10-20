@@ -2,7 +2,7 @@
 // Fixed-step simulation (60 Hz) + presentation at display rate: aircraft are drawn where they are
 // *now* (advanced through the leftover sub-step) so nothing judders against the camera.
 import { V3, Quat, qrot, qrotInv, clamp, lerp, damp, smoothstep, DEG, G, mulberry32 } from './math.js';
-import { World, FIELDS, TEAM, fieldToWorld, MAP_HALF } from './world.js';
+import { World, FIELDS, TEAM, fieldToWorld, worldToField, MAP_HALF } from './world.js';
 import { TYPES, GUNS } from './types.js';
 import { Sim, SIM_DT } from './sim.js';
 import { steer, leadPoint, Pilot } from './ai.js';
@@ -200,7 +200,7 @@ class Game {
   hideOverlays() {
     clearTimeout(this.endTimer);
     for (const id of ['#end', '#respawn', '#pause']) $(id).classList.add('hidden');
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    if (window.speechSynthesis) { window.speechSynthesis.cancel(); this.speakQ = 0; }
   }
   startAttract() {
     this.hideOverlays();
@@ -208,7 +208,7 @@ class Game {
     this.world.resetTargets();
     this.sim = new Sim(this.world, { difficulty: 'normal', noPlayer: true });
     this.state = 'title';
-    this.attractT = 0; this.attractTarget = null;
+    this.attractT = 0; this.attractTarget = null; this.spectate = null;
     this.camMode = 'cinematic';
   }
   startGame() {
@@ -219,6 +219,7 @@ class Game {
     this.sim = new Sim(this.world, { difficulty: this.selDiff, playerType: this.selType });
     this.state = 'play';
     this.score = 0; this.dead = false; this.respawnShown = false;
+    this.spectate = null; this.wingOrder = 'engage';   // per-battle state (the new Sim's flight starts on "engage")
     this.camMode = 'chase';
     const f = this.world.fields[0];
     this.aimYaw = f.hdg; this.aimPitch = 11 * DEG;
@@ -315,7 +316,11 @@ class Game {
       if (k === 'KeyC' || k === 'Pad' + PAD.CIRCLE) this.camMode = { chase: 'cockpit', cockpit: 'cinematic', cinematic: 'chase' }[this.camMode] || 'chase';
       if (k === 'KeyM') { this.mouseAim = !this.mouseAim; localStorage.setItem('scramble.mouseAim', this.mouseAim ? 'on' : 'off'); this.hud.radio(this.mouseAim ? 'CONTROLS: MOUSE AIM' : 'CONTROLS: ARROW KEYS / JOYSTICK', 'info'); if (this.mouseAim) { this.resetAim(); this.input.lock(); } else this.input.unlock(); }
       if (k === 'KeyT' || k === 'Pad' + PAD.SQUARE) this.cycleTarget();
-      if ((k === 'KeyG' || k === 'Pad' + PAD.SHARE) && this.sim.player) { const p = this.sim.player; p.gearUp = !p.gearUp; p.gearAuto = false; this.hud.radio(`GEAR ${p.gearUp ? 'UP' : 'DOWN'} (MANUAL)`, 'info'); }
+      if ((k === 'KeyG' || k === 'Pad' + PAD.SHARE) && this.sim.player) {
+        const p = this.sim.player; p.gearUp = !p.gearUp; p.gearAuto = false;
+        if (p.state === 'air') { p.landing = false; p.flapDown = !p.gearUp; }   // flaps come down with the gear
+        this.hud.radio(`GEAR${p.state === 'air' ? ' AND FLAPS' : ''} ${p.gearUp ? 'UP' : 'DOWN'} (MANUAL)`, 'info');
+      }
       if (k === 'Tab' || k === 'Pad' + PAD.TOUCHPAD) this.bigMap = !this.bigMap;
       if (k === 'KeyR') { this.voice = !this.voice; localStorage.setItem('scramble.voice', this.voice ? 'on' : 'off'); this.hud.radio(`RADIO VOICE ${this.voice ? 'ON' : 'OFF'}`, 'info'); }
       if (k === 'KeyO') { this.audio.setMuted(!this.audio.muted); }
@@ -522,8 +527,11 @@ class Game {
   gameFlow(dt) {
     const sim = this.sim;
     if (sim.result && this.state === 'play') { this.endTimer = setTimeout(() => this.endGame(sim.result.winner), 2500); this.state = 'ending'; this.hud.big(sim.result.winner === sim.playerTeam ? 'VICTORY!' : 'DEFEAT', '', 3); this.say(sim.result.winner === sim.playerTeam ? 'victory' : 'defeat'); return; }
-    const p = sim.player;
-    if (!p || !p.alive) {
+    const p = sim.player, tm = sim.teams[sim.playerTeam];
+    const queued = !!tm && tm.launchQ.some((q) => q.player);
+    if (p && p.alive) {
+      if (this.dead || this.respawnShown) { this.dead = false; this.respawnShown = false; $('#respawn').classList.add('hidden'); }   // the replacement has launched
+    } else if (!queued) {
       if (!this.dead) { this.dead = true; this.deadT = 0; this.input.unlock(); }
       this.deadT += dt;
       if (this.deadT > 3.5 && !this.respawnShown) {
@@ -573,7 +581,7 @@ class Game {
           if (near(e.x, e.y, e.z, 300)) A.impact(e, e.water ? 'water' : 'ground');
           break;
         case 'explode':
-          explosion(ps, e.x, e.y, e.z, e.size, e.kind, e.vx || 0, e.vy || 0, e.vz || 0);
+          if (near(e.x, e.y, e.z, 9000)) explosion(ps, e.x, e.y, e.z, e.size, e.kind, e.vx || 0, e.vy || 0, e.vz || 0);
           A.explosion(e, e.size);
           { const d = Math.hypot(e.x - this.cam.pos.x, e.y - this.cam.pos.y, e.z - this.cam.pos.z); this.shake = Math.max(this.shake, clamp(e.size * 120 / (d + 50), 0, 1)); if (play) this.rum.s = Math.max(this.rum.s, clamp(e.size * 150 / (d + 50), 0, 1)); this.flash = Math.max(this.flash, clamp(e.size * 60 / (d + 40), 0, 0.5)); }
           break;
@@ -624,7 +632,7 @@ class Game {
     if (this.voices.length) u.voice = this.voices[0];
     u.rate = 1.12; u.pitch = 0.9; u.volume = 0.8;
     this.speakQ = (this.speakQ || 0) + 1;
-    u.onend = () => { this.speakQ--; };
+    u.onend = u.onerror = () => { this.speakQ = Math.max(0, (this.speakQ || 0) - 1); };   // cancelled / interrupted ones end with an error
     ss.speak(u);
   }
 
@@ -665,20 +673,21 @@ class Game {
         ps.emit(P.dust, a.pos.x - a.fwd.x * 6, a.pos.y - 2, a.pos.z - a.fwd.z * 6, (rnd() - 0.5) * 4, 1, (rnd() - 0.5) * 4, 1.5);
       }
     }
-    // burning wrecks and destroyed buildings
+    // burning wrecks and destroyed buildings (the timers always run; only nearby ones get particles)
     this.wreckT = (this.wreckT || 0) + dt;
     if (this.wreckT > 0.12) {
       this.wreckT = 0;
+      const cx = this.cam.pos.x, cz = this.cam.pos.z, farSq = 9000 * 9000;
       for (const w of this.sim.wrecks) {
         w.t += 0.12;
-        if (w.t > 90) continue;
+        if (w.t > 90 || (w.x - cx) * (w.x - cx) + (w.z - cz) * (w.z - cz) > farSq) continue;
         if (rnd() < 0.5) ps.emit(P.blackSmoke, w.x + (rnd() - 0.5) * 4, w.y + 2, w.z + (rnd() - 0.5) * 4, 0, 3, 0, 1.2, 1.5);
         if (w.t < 25 && rnd() < 0.6) ps.emit(P.fire, w.x + (rnd() - 0.5) * 5, w.y + 1.5, w.z + (rnd() - 0.5) * 5, 0, 3, 0, 1.8);
       }
       for (const t of this.world.targets) {
         if (t.alive || (t.kind !== 'hangar' && t.kind !== 'fuel' && t.kind !== 'tower')) continue;
         t.burnT = (t.burnT || 0) + 0.12;
-        if (t.burnT > 150) continue;
+        if (t.burnT > 150 || (t.x - cx) * (t.x - cx) + (t.z - cz) * (t.z - cz) > farSq * 2) continue;
         const r = t.kind === 'hangar' ? 20 : 5;
         ps.emit(P.blackSmoke, t.x + (rnd() - 0.5) * r, t.y + 6, t.z + (rnd() - 0.5) * r, 0, 4, 0, t.kind === 'hangar' ? 2.2 : 1.3, 2);
         if (t.burnT < 60) ps.emit(P.fire, t.x + (rnd() - 0.5) * r, t.y + 3, t.z + (rnd() - 0.5) * r, 0, 4, 0, 3);
@@ -1100,6 +1109,26 @@ class Game {
         else if (onHome || Math.hypot(p.pos.x - f.x, p.pos.z - f.z) < 3000) { H.stage = 'near'; H.text = 'LAND AND STOP ON THE AIRFIELD TO REARM'; }
         else { H.stage = 'far'; H.text = `RETURN TO ${f.name} TO REARM`; }
         S.home = H;
+      }
+    }
+    // landing checklist: airborne with the gear coming down (or landing mode latched) near the home field
+    S.approach = null;
+    // shown with the gear down or coming down, in landing mode, or when low, slow and descending near home (why no gear yet)
+    if (S.player && p.alive && p.state === 'air' && p.agl < 500 && (p.landing || (p.gear > 0.05 && !p.gearUp) || (p.agl < 300 && p.speed < p.type.vs * 2.6 && p.vel.y < 1))) {
+      const f = sim.teams[sim.playerTeam].field;
+      const [u, v] = worldToField(f, p.pos.x, p.pos.z);
+      if (Math.abs(u) < 4500 && Math.abs(v) < 2500) {
+        const A = S.approachV || (S.approachV = { items: [], thr: new V3() });
+        const vs = p.type.vs, bank = Math.abs(p.bankAngle) / DEG, sink = -p.vel.y, mph = Math.round(p.speed * 2.237);
+        const it = A.items; it.length = 0;
+        it.push({ t: p.gear > 0.95 ? (p.flap > 0.95 ? 'GEAR + FLAPS DOWN' : 'GEAR DOWN') : p.gear > 0.05 ? `GEAR COMING ${p.gearUp ? 'UP' : 'DOWN'}` : 'GEAR UP', ok: p.gear > 0.95 });
+        it.push({ t: p.speed < vs * 2.0 ? `${mph} MPH` : `${mph} MPH - SLOW TO ${Math.round(vs * 1.4 * 2.237)}`, ok: p.speed < vs * 2.0 });
+        it.push({ t: `SINK ${Math.max(0, Math.round(sink * 3.281 * 60 / 100) * 100)} FT/MIN${sink > 6 ? ' - TOO STEEP' : ''}`, ok: sink < 6 });
+        it.push({ t: bank > 18 ? 'LEVEL THE WINGS' : 'WINGS LEVEL', ok: bank <= 18 });
+        // the near end of the runway as an aim point (until over the runway itself)
+        A.hasThr = Math.abs(u) > 650;
+        if (A.hasThr) { const [tx, tz] = fieldToWorld(f, u < 0 ? 100 - f.rwyLen / 2 : f.rwyLen / 2 - 100, 0); A.thr.set(tx, this.world.groundAt(tx, tz), tz); }
+        S.approach = A;
       }
     }
     qrot(cam.q, 1, 0, 0, S.camRight); qrot(cam.q, 0, 1, 0, S.camUp);

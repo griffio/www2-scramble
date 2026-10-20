@@ -179,7 +179,10 @@ export class Sim {
     ac.group = group;
     if (group) { if (player) group.members.unshift(ac); else group.members.push(ac); }
     const cs = CALLSIGNS[team][(group ? group.id : 0) % CALLSIGNS[team].length];
-    ac.callsign = `${group && group.kind === 'flight' ? group.name : cs} ${group ? group.members.length : 1}`;
+    const name = group && group.kind === 'flight' ? group.name : cs;
+    let n = 1;
+    if (group) while (group.members.some((m) => m !== ac && m.alive && m.callsign === `${name} ${n}`)) n++;
+    ac.callsign = `${name} ${n}`;
     this.aircraft.push(ac);
     if (player) {
       this.player = ac; ac.isPlayer = true; ac.gearAuto = true;
@@ -743,7 +746,7 @@ export class Sim {
         const open = this.runwayOpen(f);
         if (!open) {
           if (tm.launchQ.some((q) => q.player)) this.radio(tm.id, `${f.name}: RUNWAY UNSERVICEABLE`, 'alert', 'runway_unserviceable');
-          tm.launchQ = tm.launchQ.filter((q) => q.player && false);
+          tm.launchQ.length = 0;
         } else {
           // runway clear?
           const u0 = this.runwayStart(f);
@@ -857,6 +860,7 @@ export class Sim {
   respawnPlayer(type) {
     if (this.player && this.player.alive) return false;
     const tm = this.teams[this.playerTeam];
+    if (tm.launchQ.some((q) => q.player)) return false;   // already queued, waiting for the runway
     if (!this.runwayOpen(tm.field) || this.stockOf(this.playerTeam, type) <= 0) return false;
     this.playerType = type;
     const g = this.playerGroup;
