@@ -185,7 +185,7 @@ export class Sim {
     ac.callsign = `${name} ${n}`;
     this.aircraft.push(ac);
     if (player) {
-      this.player = ac; ac.isPlayer = true; ac.gearAuto = true;
+      this.player = ac; ac.isPlayer = true; ac.gearAuto = false;   // the player works the gear (G)
       this.playerStats.sorties++;
     } else {
       const sk = team === this.playerTeam ? this.diff.friendSkill : this.diff.enemySkill;

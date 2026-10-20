@@ -59,7 +59,7 @@ Source: GitHub Actions**. All paths are relative, so the game works from the `ht
 | Cockpit look | Move the mouse toward the screen edges to turn your head (sides = along the wings, far edge = over your shoulder, top = up); centre = straight ahead. **Z / X** look left / right, **F** check six, **V** padlock the target |
 | T | Next target (the red diamond is the gun lead point) |
 | 1 / 2 / 3 | Wingmen: attack my target / form up on me / engage at will |
-| G | Gear and flaps (automatic by default: they come down together when you approach your own airfield low and slow, below about 2,000 ft over the runway) · land and stop to rearm and repair (hold **S** to brake; closing the throttle also brakes). The altimeter reads height above the ground, and a landing checklist appears on approach: gear, speed, sink rate, wings level |
+| G | Gear and flaps, together: raise them after take-off (the HUD nags above 190 mph), lower them on final (flaps only extend below about 200 mph) · land and stop on your own airfield to rearm and repair (hold **S** to brake; closing the throttle also brakes). Closing the throttle in the air brakes too: the windmilling propeller is a big air brake. The altimeter reads height above the ground, and a landing checklist appears on approach: gear, speed, sink rate, wings level |
 | Tab | Big map · **N** newsreel film look · **R** radio voices on/off · **O** sound · **P / Esc** pause · **`** performance overlay |
 
 ### Gamepad (DualShock 4 / DualSense / Xbox)
@@ -91,9 +91,10 @@ from the controller, the sound comes on with the first click or key press.
 * **Arcade flight model** (`js/flight.js`): the stick commands body rates and a released stick holds
   attitude, on top of a point-mass with power-limited thrust, parasite and induced drag, AoA lift with a
   stall, and side force. Corner speed, energy bleed in hard turns, zoom climbs, stalls and the Stuka's
-  dive brakes all fall out of the physics. Taildragger ground handling, tail-down attitude, auto gear with
-  gear-linked landing flaps (lower stall speed, lots of drag), ground effect, and a landed aircraft that
-  stays on its wheels until you open up and pull for a go-around.
+  dive brakes all fall out of the physics. A windmilling propeller brakes hard with the throttle closed.
+  Taildragger ground handling, tail-down attitude, gear-linked landing flaps (lower stall speed, lots of
+  drag), ground effect, and a landed aircraft that stays on its wheels until you open up and pull for a
+  go-around.
 * **AI** (`js/ai.js`): every AI aircraft is flown through the same stick inputs as yours by a bank-to-turn
   controller. Behaviours: take-off, formation (velocity matching), escort, CAP, intercept, gun lead pursuit
   with skill-based aim wobble, break turns when someone is on their tail, level bombing with an impact

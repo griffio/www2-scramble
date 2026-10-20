@@ -196,14 +196,15 @@ export class HUD {
     if (p.state === 'air' && p.agl < 120 && p.vel.y < -12 && p.agl / -p.vel.y < 4) w.push('PULL UP!');
     if (p.state === 'air' && p.speed < p.vsNow * 1.1) w.push('STALL');
     if (p.boostHeat > 0.92) w.push('OVERHEAT');
+    if (p.state === 'air' && p.gear > 0.5 && !p.gearUp && p.speed > p.type.vs * 2.1 && p.agl > 60) w.push(`RAISE THE GEAR (${S.gearKey || 'G'})`);
     if (S.outOfBounds) w.push('RETURN TO THE BATTLE AREA');
     if (S.serviceT > 0) w.push(S.serviceT < 4 ? `GROUND CREW REARMING ${Math.ceil(4 - S.serviceT)}` : S.towWait === 'traffic' ? 'REARMED - WAITING FOR TAKE-OFF TRAFFIC' : S.towWait === 'runway' ? 'REARMED - RUNWAY UNSERVICEABLE' : 'REARMED - READY');
     if (!w.length) return;
     const blink = Math.sin(performance.now() / 120) > -0.3;
     g.font = `700 22px ${FONT}`; g.textAlign = 'center';
     w.forEach((t, i) => {
-      if (!blink && !t.startsWith('REARMED') && !t.startsWith('GROUND')) return;
-      g.fillStyle = t.startsWith('GROUND') || t.startsWith('REARMED') ? 'rgba(150,230,140,0.95)' : RED;
+      if (!blink && !t.startsWith('REARMED') && !t.startsWith('GROUND') && !t.startsWith('RAISE')) return;
+      g.fillStyle = t.startsWith('GROUND') || t.startsWith('REARMED') ? 'rgba(150,230,140,0.95)' : t.startsWith('RAISE') ? AMBER : RED;
       g.fillText(t, W / 2, H * 0.3 + i * 28);
     });
   }

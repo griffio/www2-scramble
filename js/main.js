@@ -316,10 +316,10 @@ class Game {
       if (k === 'KeyC' || k === 'Pad' + PAD.CIRCLE) this.camMode = { chase: 'cockpit', cockpit: 'cinematic', cinematic: 'chase' }[this.camMode] || 'chase';
       if (k === 'KeyM') { this.mouseAim = !this.mouseAim; localStorage.setItem('scramble.mouseAim', this.mouseAim ? 'on' : 'off'); this.hud.radio(this.mouseAim ? 'CONTROLS: MOUSE AIM' : 'CONTROLS: ARROW KEYS / JOYSTICK', 'info'); if (this.mouseAim) { this.resetAim(); this.input.lock(); } else this.input.unlock(); }
       if (k === 'KeyT' || k === 'Pad' + PAD.SQUARE) this.cycleTarget();
-      if ((k === 'KeyG' || k === 'Pad' + PAD.SHARE) && this.sim.player) {
-        const p = this.sim.player; p.gearUp = !p.gearUp; p.gearAuto = false;
-        if (p.state === 'air') { p.landing = false; p.flapDown = !p.gearUp; }   // flaps come down with the gear
-        this.hud.radio(`GEAR${p.state === 'air' ? ' AND FLAPS' : ''} ${p.gearUp ? 'UP' : 'DOWN'} (MANUAL)`, 'info');
+      if ((k === 'KeyG' || k === 'Pad' + PAD.SHARE) && this.sim.player) {   // gear + flaps, in the air only
+        const p = this.sim.player;
+        if (p.state !== 'air') this.hud.radio('GEAR DOWN AND LOCKED', 'info');
+        else { p.gearUp = !p.gearUp; p.flapDown = !p.gearUp; this.hud.radio(`GEAR AND FLAPS ${p.gearUp ? 'UP' : 'DOWN'}`, 'info'); }
       }
       if (k === 'Tab' || k === 'Pad' + PAD.TOUCHPAD) this.bigMap = !this.bigMap;
       if (k === 'KeyR') { this.voice = !this.voice; localStorage.setItem('scramble.voice', this.voice ? 'on' : 'off'); this.hud.radio(`RADIO VOICE ${this.voice ? 'ON' : 'OFF'}`, 'info'); }
@@ -438,7 +438,7 @@ class Game {
     const p = this.sim.player;
     if (!p || !p.alive || this.paused) return;
     if (this.autopilot) {   // debug / demo: an AI pilot flies the player's aircraft
-      if (!p.pilot) { p.pilot = new Pilot(this.sim, p, { skill: 0.9, group: this.sim.playerGroup }); this.sim.pilots.set(p, p.pilot); }
+      if (!p.pilot) { p.pilot = new Pilot(this.sim, p, { skill: 0.9, group: this.sim.playerGroup }); this.sim.pilots.set(p, p.pilot); p.gearAuto = true; }   // the AI needs the auto gear
       return;
     }
     const ctl = p.ctl, inp = this.input, ax = this.axes;
@@ -1111,17 +1111,19 @@ class Game {
         S.home = H;
       }
     }
-    // landing checklist: airborne with the gear coming down (or landing mode latched) near the home field
+    // landing checklist: airborne near the home field with the gear coming down, or low and slow with it still up
     S.approach = null;
-    // shown with the gear down or coming down, in landing mode, or when low, slow and descending near home (why no gear yet)
-    if (S.player && p.alive && p.state === 'air' && p.agl < 500 && (p.landing || (p.gear > 0.05 && !p.gearUp) || (p.agl < 300 && p.speed < p.type.vs * 2.6 && p.vel.y < 1))) {
+    // shown with the gear down or coming down, or when low, slow, throttled back and descending near home
+    // (then it reminds the player to lower it)
+    S.gearKey = this.input.pad ? 'SHARE' : 'G';
+    if (S.player && p.alive && p.state === 'air' && p.agl < 500 && ((p.gear > 0.05 && !p.gearUp) || (p.agl < 300 && p.speed < p.type.vs * 2.6 && p.vel.y < 1 && p.ctl.throttle < 0.7))) {
       const f = sim.teams[sim.playerTeam].field;
       const [u, v] = worldToField(f, p.pos.x, p.pos.z);
       if (Math.abs(u) < 4500 && Math.abs(v) < 2500) {
         const A = S.approachV || (S.approachV = { items: [], thr: new V3() });
         const vs = p.type.vs, bank = Math.abs(p.bankAngle) / DEG, sink = -p.vel.y, mph = Math.round(p.speed * 2.237);
         const it = A.items; it.length = 0;
-        it.push({ t: p.gear > 0.95 ? (p.flap > 0.95 ? 'GEAR + FLAPS DOWN' : 'GEAR DOWN') : p.gear > 0.05 ? `GEAR COMING ${p.gearUp ? 'UP' : 'DOWN'}` : 'GEAR UP', ok: p.gear > 0.95 });
+        it.push({ t: p.gear > 0.95 ? (p.flap > 0.95 ? 'GEAR + FLAPS DOWN' : 'GEAR DOWN') : p.gear > 0.05 ? `GEAR COMING ${p.gearUp ? 'UP' : 'DOWN'}` : `GEAR UP - PRESS ${S.gearKey}`, ok: p.gear > 0.95 });
         it.push({ t: p.speed < vs * 2.0 ? `${mph} MPH` : `${mph} MPH - SLOW TO ${Math.round(vs * 1.4 * 2.237)}`, ok: p.speed < vs * 2.0 });
         it.push({ t: `SINK ${Math.max(0, Math.round(sink * 3.281 * 60 / 100) * 100)} FT/MIN${sink > 6 ? ' - TOO STEEP' : ''}`, ok: sink < 6 });
         it.push({ t: bank > 18 ? 'LEVEL THE WINGS' : 'WINGS LEVEL', ok: bank <= 18 });

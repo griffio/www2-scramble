@@ -2,9 +2,10 @@
 // holds attitude) on top of a simple but physical point-mass: thrust from power (falls with
 // speed), parasite + induced drag, lift from angle of attack with a stall, side force from
 // sideslip. Corner speed, energy bleed in hard turns, zoom climbs and stalls all emerge.
-// Landing: gear and split flaps (big drag, extra lift, lower stall speed) come down together in
-// "landing mode" (latched near the home runway; see stepAir), a little ground effect cushions the
-// flare, and a landed aircraft stays on its wheels until the pilot asks for a go-around.
+// Landing: the gear and the split flaps (big drag, extra lift, lower stall speed) come down together
+// (the player works them with one key; AI gear retracts by itself after take-off), the windmilling
+// propeller brakes with the throttle closed, a little ground effect cushions the flare, and a landed
+// aircraft stays on its wheels until the pilot asks for a go-around.
 import { V3, Quat, qrot, qrotInv, clamp, lerp, smoothstep, G, DEG, wrapPi } from './math.js';
 
 const ALPHA_STALL = 16 * DEG;
@@ -21,7 +22,7 @@ export class Aircraft {
     this.rpm = 0.3; this.boostHeat = 0;
     this.hp = type.hp; this.state = 'air';
     this.gear = 1; this.gearAuto = true;
-    this.flap = 0; this.flapDown = false; this.landing = false; this.landingCool = 0;   // flaps follow the gear in landing mode
+    this.flap = 0; this.flapDown = false;                        // flaps follow the gear down
     this.vsNow = type.vs;                                        // stall speed in the current configuration
     this.groundPitch = 0; this.heading = 0;
     this.alpha = 0; this.beta = 0; this.nz = 1; this.speed = 0; this.stall = 0;
@@ -49,7 +50,7 @@ export class Aircraft {
     this.pos.set(x, groundY + this.gearH0, z);
     this.vel.set(0, 0, 0); this.w.set(0, 0, 0);
     this.gear = 1; this.gearUp = false; this.rpm = 0.6; this.speed = 0;
-    this.flap = 0; this.flapDown = false; this.landing = false; this.landedAt = undefined;
+    this.flap = 0; this.flapDown = false; this.landedAt = undefined;
     this.updateBasis();
   }
   placeInAir(x, y, z, hdg, speed) {
@@ -59,7 +60,7 @@ export class Aircraft {
     this.updateBasis();
     this.vel.copy(this.fwd).scale(speed);
     this.gear = 0; this.gearUp = true; this.rpm = 1; this.speed = speed;
-    this.flap = 0; this.flapDown = false; this.landing = false;
+    this.flap = 0; this.flapDown = false;
   }
   updateBasis() {
     qrot(this.q, 0, 0, -1, this.fwd); qrot(this.q, 0, 1, 0, this.up); qrot(this.q, 1, 0, 0, this.right);
@@ -145,7 +146,9 @@ export class Aircraft {
     this.nz = n;
     // drag
     const brake = this.diveBrake * 2.6 + (this.state === 'down' ? 1.5 : 0);
-    const Dp = T.cd0 * V * V * (1 + this.gear * 0.35 + brake);
+    // throttle closed: the windmilling propeller is a big flat disc (closing the throttle really brakes)
+    const idle = 1 - clamp(this.rpm / 0.4, 0, 1);
+    const Dp = T.cd0 * V * V * (1 + this.gear * 0.35 + brake + 1.5 * idle);
     const Di = (T.ki * n * n / Math.max(V * V, 300)) * (1 - 0.35 * ge) + T.ki * 0.6 * (beta * beta) * 10 / Math.max(V * V, 300) * qbar;
     // the undercarriage and the barn-door flaps: drag that matters at approach speed (per unit of qbar,
     // so it scales with the aircraft's own stall speed rather than its tiny clean cd0)
@@ -162,22 +165,9 @@ export class Aircraft {
       const gh = world.groundAt(this.pos.x, this.pos.z);
       const agl = this.pos.y - gh;
       this.agl = agl;
-      if (this.gearAuto && this.state === 'air') {
-        // landing mode latches when the aircraft comes in low and not too fast over its own airfield;
-        // it unlatches on a go-around (climbing away, or back above 300 m / 3 km out), never frame to frame
-        if (!this.landing) {
-          this.landingCool = Math.max(0, this.landingCool - dt);
-          if (this.landingCool <= 0 && agl < 200 && V < vs * 2.3 && this.vel.y < 3) {
-            const rw = world.onRunway(this.pos.x, this.pos.z, 1500);
-            if (rw && rw.field.team === this.team) this.landing = true;
-          }
-        } else if (agl > 300 || (this.vel.y > 4 && agl > 60 && V > vs * 1.3) || !world.onRunway(this.pos.x, this.pos.z, 3000)) {
-          this.landing = false; this.landingCool = 12;   // gear stays up for a while after a go-around
-        }
-        if (this.landing) this.gearUp = false;
-        else if (this.gear > 0 && agl > 25 && V > vs * 1.25) this.gearUp = true;
-        this.flapDown = this.landing;
-      }
+      // AI aircraft raise the gear after take-off by themselves (they never touch down: the sim "lands"
+      // them near home); the player's gear is manual
+      if (this.gearAuto && this.state === 'air' && this.gear > 0 && agl > 25 && V > vs * 1.25) this.gearUp = true;
       this.gear = clamp(this.gear + (this.gearUp ? -dt / 3 : dt / 3), 0, 1);
       // flaps follow the gear down (below the flap limit speed) and come up with it
       const flapOut = this.flapDown && !this.gearUp && V < vs * 2.2;
@@ -256,7 +246,7 @@ export class Aircraft {
       this.w.x = 0.05;
       this.vel.y = 1.0;
       this.landedAt = undefined;
-      this.landing = false; this.flapDown = false;
+      this.flapDown = false;
     }
   }
 }
