@@ -1,10 +1,13 @@
 // The battle: aircraft, weapons, damage, airfields, AA and the two commanders that scramble
 // fighters and send raids. Pure JS (no DOM) so it also runs headless in Node (tools/battle.mjs).
 // Presentation (particles, audio, HUD) reads `sim.events`, which is cleared each frame by the host.
-import { V3, qrot, clamp, lerp, G, DEG } from './math.js';
+import { V3, qrot, clamp, lerp, smoothstep, G, DEG } from './math.js';
 import { Aircraft } from './flight.js';
 import { Pilot, leadPoint } from './ai.js';
 import { TYPES, GUNS, BOMBS } from './types.js';
+import { FactoryRaid } from './factory-raid.js';
+import { OperationsMission } from './operations.js';
+import { OPERATIONS } from './scenarios.js';
 import { TEAM, worldToField, fieldToWorld } from './world.js';
 
 export const SIM_DT = 1 / 60;
@@ -69,7 +72,7 @@ class Group {
 const CALLSIGNS = { 0: ['RED', 'BLUE', 'YELLOW', 'GREEN', 'WHITE'], 1: ['ROT', 'BLAU', 'GELB', 'SCHWARZ'] };
 
 export class Sim {
-  constructor(world, { playerType = 'spitfire', difficulty = 'normal', headless = false, noPlayer = false } = {}) {
+  constructor(world, { playerType = 'spitfire', difficulty = 'normal', headless = false, noPlayer = false, raidStart = 'runway' } = {}) {
     this.world = world; this.time = 0;
     this.diff = DIFFICULTY[difficulty] || DIFFICULTY.normal; this.difficulty = difficulty;
     this.aircraft = []; this.pilots = new Map(); this.groups = [];
@@ -90,7 +93,9 @@ export class Sim {
     raf[0].stock = { spitfire: 7, mosquito: 2 }; raf[1].stock = { spitfire: 6, mosquito: 3 }; raf[2].stock = { spitfire: 5, mosquito: 3 };
     lw[0].stock = { bf109: 4, fw190: 2, ju87: 2, ju88: 2 }; lw[1].stock = { bf109: 4, fw190: 2, ju87: 2, ju88: 2 }; lw[2].stock = { bf109: 3, fw190: 2, ju87: 2, ju88: 2 };
     this.noPlayer = noPlayer;
-    this.opening();
+    if (world.scenario === 'factory') this.mission = new FactoryRaid(this, { start: raidStart });
+    else if (OPERATIONS.includes(world.scenario)) this.mission = new OperationsMission(this, { start: raidStart });
+    else this.opening();
   }
 
   // ---------------------------------------------------------------- setup
@@ -199,6 +204,7 @@ export class Sim {
   // AI aircraft that make it home "land" and go back into the reserves
   landAI(ac) {
     if (!ac.alive) return;
+    this.mission?.wingmanLanded(ac);
     this.removeAircraft(ac);
     if (this.returnStock(ac.team, ac.type.key) && ac.team === this.playerTeam && ac.group === this.playerGroup) {
       this.radio(ac.team, `${ac.callsign}: LANDING, REARMING`, 'wing', this.redVoice(ac, 'landing'));
@@ -215,6 +221,15 @@ export class Sim {
   targetedBy(e, except) { let n = 0; for (const p of this.pilots.values()) if (p.target === e && p.ac !== except) n++; return n; }
 
   pickBombTarget(team, near, pilot) {
+    if (this.mission && team === this.playerTeam) {
+      const from = near || pilot?.ac.pos || this.mission.target;
+      let best = null, distance = Infinity;
+      for (const hall of this.mission.target.obstacles || this.mission.target.halls) {
+        const d = Math.hypot(hall.x - from.x, hall.z - from.z);
+        if (hall.alive && d < distance) { best = hall; distance = d; }
+      }
+      return best;
+    }
     const f = this.teams[1 - team].field;
     const cands = [];
     for (const h of f.hangars) if (h.alive) cands.push(h);
@@ -262,15 +277,16 @@ export class Sim {
   // voice line for a member of the player's flight ("RED 3" -> red3_down)
   redVoice(ac, what) {
     const m = /^RED (\d)$/.exec(ac.callsign || '');
-    return m && +m[1] >= 2 && +m[1] <= 4 && ac.group === this.playerGroup ? `red${m[1]}_${what}` : null;
+    return m && +m[1] >= 2 && +m[1] <= 4 && ac.group === this.playerGroup ? `red${m[1]}_${what}` : this.mission && ac.group === this.playerGroup ? `wingman_${what}` : null;
   }
 
   // ---------------------------------------------------------------- main step
   step(dt = SIM_DT) {
     this.time += dt;
-    this.director(dt);
+    if (!this.mission) this.director(dt);
+    this.mission?.beforeStep?.(dt);
     // AI decisions + controls
-    for (const p of this.pilots.values()) p.update(dt);
+    for (const p of this.pilots.values()) if (!this.mission?.holdWingman(p.ac)) p.update(dt);
     // physics + weapons
     const list = this.aircraft;
     for (let i = 0; i < list.length; i++) {
@@ -292,6 +308,7 @@ export class Sim {
       if (c.y < this.world.groundAt(c.x, c.z) + 0.5) { this.chutes[i] = this.chutes[this.chutes.length - 1]; this.chutes.pop(); }
     }
     this.playerServices(dt);
+    this.mission?.step(dt);
   }
 
   weapons(ac, dt) {
@@ -322,13 +339,17 @@ export class Sim {
       this.ev({ t: 'gun', ac, kind: vd.kind, x: ac.pos.x, y: ac.pos.y, z: ac.pos.z });
     }
     ac.bombCool -= dt;
-    if (ctl.bomb && ac.bombs > 0 && ac.bombCool <= 0 && ac.state === 'air') {
-      ac.bombCool = 0.18;
-      const hp = geom && geom.hardpoints.length ? geom.hardpoints[(T.bombs - ac.bombs) % geom.hardpoints.length] : { x: 0, y: -1, z: 0, kind: T.bombKind };
+    if (ctl.bomb && ac.bombs > 0 && ac.bombCool <= 0 && ac.state === 'air' && this.mission?.canReleaseWeapon?.(ac) !== false) {
+      ac.bombCool = T.bombKind === 'rocket25' ? .14 : .18;
+      const rack=geom?.hardpoints||[],rackIndex=rack.length?((T.bombs-ac.bombs)%rack.length+rack.length)%rack.length:0;
+      const hp = rack.length ? rack[rackIndex] : { x: 0, y: -1, z: 0, kind: T.bombKind };
       ac.bombs--;
       qrot(ac.q, hp.x, hp.y - 0.3, hp.z, _a);
-      this.bombs.push({ x: ac.pos.x + _a.x, y: ac.pos.y + _a.y, z: ac.pos.z + _a.z, vx: ac.vel.x, vy: ac.vel.y - 1, vz: ac.vel.z, kind: hp.kind || T.bombKind, team: ac.team, owner: ac, t: 0 });
+      const kind = hp.kind || T.bombKind;
+      const direction = kind === 'rocket25' ? BOMBS.rocket25.velocity : 0;
+      this.bombs.push({ x: ac.pos.x + _a.x, y: ac.pos.y + _a.y, z: ac.pos.z + _a.z, vx: ac.vel.x + ac.fwd.x * direction, vy: ac.vel.y + ac.fwd.y * direction - (direction ? 0 : 1), vz: ac.vel.z + ac.fwd.z * direction, kind, rocket: kind === 'rocket25', team: ac.team, owner: ac, t: 0, delay: T.bombDelay || 0 });
       this.ev({ t: 'bombdrop', ac });
+      this.mission?.bombDropped(ac);
     }
   }
 
@@ -369,43 +390,87 @@ export class Sim {
     }
   }
 
-  // airfield flak and light AA
+  // Terrain and factory roofs provide cover from the raid batteries.
+  gunCanSee(gun, aircraft) {
+    const dx = aircraft.pos.x - gun.x, dy = aircraft.pos.y - (gun.y + 2.5), dz = aircraft.pos.z - gun.z;
+    const steps = Math.max(2, Math.ceil(Math.hypot(dx, dz) / 150));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps, x = gun.x + dx * t, z = gun.z + dz * t;
+      if (gun.y + 2.5 + dy * t < this.world.groundAt(x, z) + 1) return false;
+    }
+    for (const hall of this.mission?.target.obstacles || this.mission?.target.halls || []) {
+      if (!hall.alive || gun.vessel === hall) continue;
+      const hx = hall.kind === 'factory' ? 40 : hall.kind === 'ship' ? (Math.abs(Math.cos(hall.yaw))*hall.beam + Math.abs(Math.sin(hall.yaw))*hall.length)/2 : 18;
+      const hz = hall.kind === 'factory' ? 60 : hall.kind === 'ship' ? (Math.abs(Math.sin(hall.yaw))*hall.beam + Math.abs(Math.cos(hall.yaw))*hall.length)/2 : 24;
+      let enter = 0, leave = 1;
+      for (const [origin, delta, lo, hi] of [[gun.x, dx, hall.x - hx, hall.x + hx],
+        [gun.y + 2.5, dy, hall.y, hall.y + hall.h], [gun.z, dz, hall.z - hz, hall.z + hz]]) {
+        if (Math.abs(delta) < 1e-6) { if (origin < lo || origin > hi) { enter = 2; break; } }
+        else {
+          const a = (lo - origin) / delta, b = (hi - origin) / delta;
+          enter = Math.max(enter, Math.min(a, b)); leave = Math.min(leave, Math.max(a, b));
+        }
+      }
+      if (enter < leave && leave > 0 && enter < 1) return false;
+    }
+    return true;
+  }
+
+  // Airfield and factory flak / light AA; raid batteries have configurable reaction and burst timing.
+  aaExposure(ac) {
+    return smoothstep(120, 450, ac.pos.y - this.world.groundAt(ac.pos.x, ac.pos.z));
+  }
+
   airDefence(dt) {
     for (const t of this.world.targets) {
       if ((t.kind !== 'flak' && t.kind !== 'lightAA') || !t.alive) continue;
       t.cool -= dt;
       if (t.cool > 0) continue;
       const heavy = t.kind === 'flak';
-      const range = heavy ? 4500 : 2000;
-      let best = null, bd = range;
+      const range = t.range ?? (heavy ? 4500 : 2000);
+      let best = null, bd = range, priority = Infinity;
       for (const e of this.aircraft) {
         if (e.team === t.team || !e.alive || e.state !== 'air') continue;
         const d = Math.hypot(e.pos.x - t.x, e.pos.y - t.y, e.pos.z - t.z);
-        if (heavy && e.pos.y - t.y < 250) continue;
-        if (d < bd) { bd = d; best = e; }
+        const exposure = t.raidGun ? this.aaExposure(e) : 0;
+        if (d >= range * (1 + exposure * 0.35)) continue;
+        if (e.pos.y - t.y < (t.minAlt ?? (heavy ? 250 : -Infinity))) continue;
+        if (t.raidGun && !this.gunCanSee(t, e)) continue;
+        const score = d / (1 + exposure);
+        if (score < priority) { priority = score; bd = d; best = e; }
       }
-      if (!best) { t.cool = 0.5 + rnd() * 0.5; continue; }
+      if (!best) { t.cool = 0.5 + rnd() * 0.5; t.trackingId = null; continue; }
+      const exposure = t.raidGun ? this.aaExposure(best) : 0;
+      const cadence = 1 + exposure * 1.8, accuracy = 1 - exposure * 0.65;
+      const damageScale = (t.damageScale ?? 1) * (1 + exposure * 2);
+      if (t.raidGun && t.trackingId !== best.id) {
+        t.trackingId = best.id; t.cool = t.reaction * this.diff.flakErr / (1 + exposure);
+        this.mission?.defenceSpotted(best);
+        continue;
+      }
+      if (t.raidGun) this.mission?.defenceFired(best);
       if (heavy) {
-        t.cool = 1.8 + rnd() * 1.2;
+        t.cool = t.reload ? (t.reload + rnd() * 0.8) / cadence : 1.8 + rnd() * 1.2;
         const tof = bd / 620;
-        const err = (25 + bd * 0.022) * this.diff.flakErr * (best === this.player ? 1.2 : 1);
+        const err = (25 + bd * 0.022) * this.diff.flakErr * (best === this.player ? 1.2 : 1) * (t.aimError ?? 1) * accuracy;
         _a.copy(best.pos).addScaled(best.vel, tof);
         _a.x += (rnd() - 0.5) * 2 * err; _a.y += (rnd() - 0.5) * 2 * err; _a.z += (rnd() - 0.5) * 2 * err;
-        this.shells.push({ x: _a.x, y: _a.y, z: _a.z, t: tof, team: t.team });
+        if (t.raidGun) _a.y = Math.max(_a.y, this.world.groundAt(_a.x, _a.z) + 8);
+        this.shells.push({ x: _a.x, y: _a.y, z: _a.z, t: tof, team: t.team, damageScale });
         t.aimYaw = Math.atan2(_a.x - t.x, -(_a.z - t.z)); t.aimPitch = Math.atan2(_a.y - t.y, Math.hypot(_a.x - t.x, _a.z - t.z));
         this.ev({ t: 'flakfire', x: t.x, y: t.y + 3, z: t.z, gun: t });
       } else {
         // bursts of 40 mm tracer with lead
         t.burst = (t.burst || 0) + 1;
-        t.cool = t.burst % 5 === 0 ? 1.4 + rnd() : 0.28;
+        t.cool = (t.burst % (t.burstLength ?? 5) === 0 ? (t.burstPause ?? 1.4) + rnd() : (t.shotGap ?? 0.28)) / cadence;
         const o = _c.set(t.x, t.y + 2.5, t.z);
         leadPoint({ pos: o, vel: null }, best, GUNS.aa.v, _b);
-        const spread = 0.02 * this.diff.flakErr;
+        const spread = 0.02 * this.diff.flakErr * (t.aimError ?? 1) * accuracy;
         _b.sub(o).normalize();
         _b.x += (rnd() - 0.5) * spread * 2; _b.y += (rnd() - 0.5) * spread * 2; _b.z += (rnd() - 0.5) * spread * 2;
         _b.normalize();
         t.aimYaw = Math.atan2(_b.x, -_b.z); t.aimPitch = Math.asin(clamp(_b.y, -1, 1));
-        this.bullets.add(o.x, o.y, o.z, _b.x * GUNS.aa.v, _b.y * GUNS.aa.v, _b.z * GUNS.aa.v, GUN_IDX.aa, t.team, null);
+        this.bullets.add(o.x, o.y, o.z, _b.x * GUNS.aa.v, _b.y * GUNS.aa.v, _b.z * GUNS.aa.v, GUN_IDX.aa, t.team, null, damageScale);
         this.ev({ t: 'gun', ac: null, kind: 'aa', x: o.x, y: o.y, z: o.z });
       }
     }
@@ -421,7 +486,7 @@ export class Sim {
       for (const e of this.aircraft) {
         if (e.team === s.team || !e.alive) continue;
         const d = Math.hypot(e.pos.x - s.x, e.pos.y - s.y, e.pos.z - s.z);
-        if (d < 32) this.damage(e, 32 * (1 - d / 32) ** 1.5 + 2, null, s);
+        if (d < 32) this.damage(e, (32 * (1 - d / 32) ** 1.5 + 2) * (s.damageScale ?? 1), null, s);
       }
     }
   }
@@ -484,18 +549,20 @@ export class Sim {
 
   bulletStructures(x, z, team, kind, owner, hAbove = 0) {
     const f = this.world.inField(x, z);
-    if (!f || f.team === team) return false;
+    if ((!f || f.team === team) && !this.mission) return false;
     const sd = GUNS[kind].structDmg;
     for (const t of this.world.targets) {
-      if (t.field !== f || !t.alive || t.kind === 'runway') continue;
+      const raidTarget = this.mission && (t.raidGun || t.kind === 'factory' || t.operationTarget);
+      if ((!raidTarget && t.field !== f) || (t.team === team && !(t.kind === 'housing' && this.mission?.key === 'precision')) || !t.alive || t.kind === 'runway') continue;
       const d = Math.hypot(t.x - x, t.z - z);
       if (d < t.r && hAbove < t.h) {
-        this.damageStructure(t, sd * (t.kind === 'hangar' ? 1 : 12), owner);
+        this.damageStructure(t, sd * (t.kind === 'ship' ? .05 : ['hangar', 'factory', 'objective', 'housing'].includes(t.kind) ? 1 : 12), owner);
         this.ev({ t: 'hit', x, y: t.y + Math.min(hAbove, t.h * 0.7), z, struct: true, kind });
         return true;
       }
     }
     // parked aircraft
+    if (!f || f.team === team) return false;
     for (const p of f.parking) {
       if (!p.plane) continue;
       const [px, pz] = fieldToWorld(f, p.u, p.v);
@@ -526,12 +593,63 @@ export class Sim {
     for (let i = this.bombs.length - 1; i >= 0; i--) {
       const b = this.bombs[i];
       b.t += dt;
+      if (b.rocket) {
+        const ox=b.x,oy=b.y,oz=b.z;
+        b.x+=b.vx*dt;b.y+=b.vy*dt-.5*G*dt*dt;b.z+=b.vz*dt;b.vy-=G*dt;
+        let hit=null,nearest=Infinity;
+        // Sweep against oriented hulls, including vertical extent. No proximity blast:
+        // solid shot must physically cross a ship, even at large frame steps.
+        for(const target of this.mission?.target.halls || []) {
+          if(target.kind!=='ship'||!target.alive||target.team===b.team)continue;
+          const sin=Math.sin(target.yaw),cos=Math.cos(target.yaw),dx=b.x-ox,dz=b.z-oz;
+          let lo=0,hi=1;
+          const axes=[
+            [cos*(ox-target.x)-sin*(oz-target.z),cos*dx-sin*dz,target.beam/2+.3],
+            [-sin*(ox-target.x)-cos*(oz-target.z),-sin*dx-cos*dz,target.length/2+.3],
+            [oy-target.y-target.h/2,b.y-oy,target.h/2+.3],
+          ];
+          for(const [offset,delta,radius] of axes) {
+            if(Math.abs(delta)<1e-9){if(Math.abs(offset)>radius)hi=-1;}
+            else {let a=(-radius-offset)/delta,c=(radius-offset)/delta;if(a>c)[a,c]=[c,a];lo=Math.max(lo,a);hi=Math.min(hi,c);}
+          }
+          if(lo<=hi&&lo<nearest){nearest=lo;hit=target;}
+        }
+        if(hit) {
+          b.x=ox+(b.x-ox)*nearest;b.y=oy+(b.y-oy)*nearest;b.z=oz+(b.z-oz)*nearest;
+          this.damageStructure(hit,BOMBS.rocket25.dmg,b.owner);
+          this.ev({t:'hit',x:b.x,y:b.y,z:b.z,struct:true,kind:'rocket25'});
+          if(b.owner?.isPlayer){this.playerStats.bombsHit++;this.mission.playerHits++;}
+          this.bombs.splice(i,1);continue;
+        }
+        const ground=Math.max(0,this.world.heightAt(b.x,b.z));
+        if(b.t>BOMBS.rocket25.life||b.y<=ground){
+          this.bombs.splice(i,1);
+          if(b.y<=ground)this.ev({t:'impact',x:b.x,y:ground,z:b.z,water:ground===0,kind:'bomb'});
+        }
+        continue;
+      }
+      if (b.running) { if (this.mission?.stepTorpedo(b, dt)) this.bombs.splice(i, 1); continue; }
+      if (b.landed) {
+        b.fuse -= dt;
+        if (b.fuse <= 0) { this.bombs.splice(i, 1); this.bombImpact(b, b.groundY); }
+        continue;
+      }
       b.vy -= G * dt;
       b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
       const gh = this.world.heightAt(b.x, b.z);
       if (b.y <= Math.max(gh, 0)) {
-        this.bombs.splice(i, 1);
-        this.bombImpact(b, gh);
+        if (b.kind === 'torpedo18' && gh <= 0) {
+          const speed = Math.hypot(b.vx, b.vz) || 1;
+          b.running = true; b.y = 0.1; b.vy = 0; b.vx *= 45 / speed; b.vz *= 45 / speed;
+          this.ev({ t: 'impact', x: b.x, y: 0, z: b.z, water: true, kind: 'bomb' });
+        } else if (b.delay > 0 && gh > 0) {
+          b.landed = true; b.fuse = b.delay; b.groundY = gh; b.y = gh + 0.2;
+          b.vx = b.vy = b.vz = 0;
+          this.ev({ t: 'impact', x: b.x, y: gh, z: b.z, water: false, kind: 'bomb' });
+        } else {
+          this.bombs.splice(i, 1);
+          this.bombImpact(b, gh);
+        }
       }
     }
   }
@@ -542,6 +660,7 @@ export class Sim {
     const y = Math.max(gh, 0);
     this.ev({ t: 'explode', x: b.x, y, z: b.z, size: 2.4, kind: water ? 'water' : 'bomb' });
     if (water) return;
+    this.mission?.bombDetonated(b);
     const f = this.world.inField(b.x, b.z);
     let hitAny = false;
     // structures
@@ -582,14 +701,15 @@ export class Sim {
 
   damageStructure(t, dmg, owner) {
     if (!t.alive) return;
+    this.mission?.structureHit?.(t, dmg, owner);
     t.hp -= dmg;
     if (t.hp > 0) return;
     t.alive = false; t.hp = 0;
-    const big = t.kind === 'hangar' || t.kind === 'fuel';
+    const big = t.kind === 'hangar' || t.kind === 'fuel' || t.kind === 'factory';
     this.ev({ t: 'explode', x: t.x, y: t.y + (t.h || 2) * 0.5, z: t.z, size: t.kind === 'fuel' ? 3 : big ? 2.6 : 1.2, kind: t.kind === 'fuel' ? 'fuel' : 'ground' });
     this.ev({ t: 'struct', target: t });
-    const f = t.field, own = f.team, enemy = 1 - own;
-    const names = { hangar: 'HANGAR', runway: 'RUNWAY SECTION', fuel: 'FUEL STORE', tower: 'CONTROL TOWER', flak: 'FLAK BATTERY', lightAA: 'AA GUN' };
+    const f = t.field, own = t.team ?? f.team, enemy = 1 - own;
+    const names = { ship: 'ENEMY SHIP', objective: 'MISSION TARGET', housing: 'OCCUPIED HOUSING', factory: 'WIRELESS FACTORY HALL', hangar: 'HANGAR', runway: 'RUNWAY SECTION', fuel: 'FUEL STORE', tower: 'CONTROL TOWER', flak: 'FLAK BATTERY', lightAA: 'AA GUN' };
     if (t.kind === 'hangar') {
       const lost = Object.entries(t.stock).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${TYPES[k].short}`).join(', ');
       t.stock = {};
@@ -675,6 +795,11 @@ export class Sim {
       if (a.state === 'dead') continue;
       // structures and masts at low level
       if (a.agl !== undefined && a.agl < 110) {
+        if (this.mission) for (const hall of this.mission.target.obstacles || this.mission.target.halls) {
+          if (hall.alive && Math.abs(a.pos.x - hall.x) < (hall.kind === 'factory' ? 40 : hall.kind === 'ship' ? hall.length / 2 : 18) && Math.abs(a.pos.z - hall.z) < (hall.kind === 'factory' ? 60 : hall.kind === 'ship' ? hall.beam / 2 : 24) && a.pos.y < hall.y + hall.h) {
+            a.state = 'dead'; a.crashKind = 'ground';
+          }
+        }
         for (const m of this.world.masts) {
           if (Math.hypot(a.pos.x - m.x, a.pos.z - m.z) < m.r && a.pos.y < m.y + m.h) { a.state = 'dead'; a.crashKind = 'ground'; }
         }

@@ -2,6 +2,10 @@
   "name": "scramble-voices",
   "private": true,
   "type": "module",
-  "description": "Generates the radio voice lines in audio/voice/ with Kokoro TTS (run: npm i && node make-voices.mjs)",
-  "dependencies": { "kokoro-js": "1.2.1" }
+  "description": "Offline ElevenLabs radio voice generation and validation",
+  "scripts": {
+    "plan": "node make-voices.mjs plan",
+    "generate": "node make-voices.mjs generate",
+    "check": "node make-voices.mjs check"
+  }
 }

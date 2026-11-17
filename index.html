@@ -18,8 +18,29 @@
   <div class="panel">
     <div class="kicker">THE STRAIT OF DOVER &middot; SUMMER 1943</div>
     <h1>SCRAMBLE!</h1>
+    <div class="scenarios" role="group" aria-label="Scenario">
+      <button data-scenario="channel">CHANNEL BATTLE</button>
+      <button data-scenario="factory">WIRELESS FACTORY RAID</button>
+      <button data-scenario="escort">BRING THEM HOME</button>
+      <button data-scenario="convoy">MAST-HEIGHT STRIKE</button>
+      <button data-scenario="precision">ONE PRECISE PASS</button>
+      <button data-scenario="intercept">BREAK THE FORMATION</button>
+      <button data-scenario="rescue">ONE ENGINE HOME</button>
+      <button data-scenario="fortress">LITTLE FRIENDS</button>
+      <button data-scenario="norway">NORWEGIAN COASTAL STRIKE</button>
+    </div>
     <p class="lede">The Luftwaffe is forming up over Cap Gris-Nez. Take your flight off from RAF Hawkinge, smash their raids, then carry the fight across the Channel &mdash; <b>destroy the hangars and crater the runway</b> at Audembert, and sweep their squadrons from the sky.</p>
+    <div id="operation-card" class="hidden">
+      <div class="pname"></div><p class="operation-orders"></p>
+      <p class="hint">Historically inspired aircraft and tactics, with compressed geography and arcade flight, damage and weapon envelopes. Full sortie starts airborne; quick start skips to the action. C changes camera; F checks six. Stay with the aircraft you are protecting.</p>
+    </div>
     <div class="planes">
+      <div class="plane hidden" data-type="beaufighter">
+        <div class="pname">BRISTOL BEAUFIGHTER</div>
+        <div class="prole">LOW-LEVEL FACTORY STRIKE · PLAYABLE MISSION</div>
+        <ul><li>Lead three AI wingmen in your twin-engine Beaufighter</li><li>Fly the Channel crossing and Dutch approach using waypoint guidance</li><li>Release 2 &times; 500 lb bombs yourself, then escape the eight-second delay fuzes</li><li>Evade AA tracers and heavy flak; strafe gun positions to silence them</li></ul>
+        <p class="hint">Inspired by the Philips works raid at Eindhoven. An imagined Beaufighter sortie with compressed geography and an arcade bomb load.</p>
+      </div>
       <div class="plane" data-type="spitfire">
         <div class="pname">SUPERMARINE SPITFIRE MK IX</div>
         <div class="prole">AIR SUPERIORITY FIGHTER</div>
@@ -34,16 +55,27 @@
     <div class="row">
       <div class="diff"><span>PILOTS</span><button data-diff="easy">ROOKIE</button><button data-diff="normal">VETERAN</button><button data-diff="ace">ACE</button></div>
       <button id="go">SCRAMBLE!</button>
+      <button id="practice-coast" data-raid-start="coast" class="hidden">PRACTISE FROM DUTCH COAST</button>
     </div>
     <div class="controls">
+      <div id="raid-controls" class="hidden">
+        <div>Skip the crossing with <b>PRACTISE FROM DUTCH COAST</b>, or use <b>RETRY FROM DUTCH COAST</b> in the pause and result menus.</div>
+        <div><b>YOUR MISSION:</b> bomb the factory, evade the fighter interception, and escape to the Dutch coast. Return to Hawkinge for an optional landing bonus.</div>
+        <div>Pull back above <b>100 MPH</b> to take off; press <b>G</b> to raise gear. Line up the yellow impact circle and press <b>B</b> or <b>RMB</b> to release.</div>
+        <div><b>C</b> chase / cockpit / raid camera &middot; <b>F</b> look back in the cockpit. You keep flying in every camera view.</div>
+        <div><b>1</b> wingmen suppress AA &middot; <b>2</b> break off and cover / form up &middot; <b>3</b> bomb the factory. Controller: D-pad left / right cycles orders.</div>
+        <div class="hint">Above 400 ft, AA tracks faster and hits harder; by 1,500 ft it is at full strength. Stay low, vary your heading, and suppress the red gun markers.</div>
+      </div>
+      <div id="battle-controls">
       <div><b>&uarr;</b> nose down &middot; <b>&darr;</b> nose up &middot; <b>&larr;/&rarr;</b> roll &middot; <b>Q/E</b> rudder &middot; <b>SPACE</b> guns &middot; <b>B</b> bombs</div>
       <div><b>W/S</b> throttle &middot; <b>SHIFT</b> emergency boost &middot; <b>A/D</b> also roll &middot; <b>LMB</b> guns &middot; <b>RMB</b> bombs</div>
       <div><b>C</b> camera &middot; <b>V</b> (hold) look at target &middot; <b>T</b> next target &middot; <b>WHEEL</b> zoom &middot; <b>TAB</b> map</div>
       <div><b>COCKPIT</b>: move the <b>mouse</b> toward the screen edges to look around &middot; <b>Z/X</b> look left / right &middot; <b>F</b> check six &middot; <b>V</b> padlock target</div>
-      <div><b>1/2/3</b> wingmen: attack my target / form up / engage &middot; <b>M</b> switch to mouse aim &middot; <b>G</b> gear</div>
+      <div id="wing-controls"><b>1/2/3</b> wingmen: attack my target / form up / engage &middot; <b>M</b> switch to mouse aim &middot; <b>G</b> gear</div>
       <div><b>N</b> newsreel film &middot; <b>R</b> radio voice &middot; <b>O</b> sound &middot; <b>P/ESC</b> pause &middot; <b>`</b> performance</div>
       <div class="hint">Land back on your own runway and stop to rearm &amp; repair (hold <b>S</b> to brake). Gamepads work too (DualShock 4, DualSense, Xbox): press any button.</div>
       <div class="padctl hidden"></div>
+      </div>
       <div class="credits">Engine recordings from freesound.org: Rolls-Royce Merlin by <a href="https://freesound.org/people/squashy555/sounds/276597/" target="_blank" rel="noopener">squashy555</a> (CC0) &middot; Bf 109 Daimler-Benz by <a href="https://freesound.org/people/Fight2FlyPhoto/sounds/142898/" target="_blank" rel="noopener">Fight2FlyPhoto</a> (<a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>) &middot; sound effects by qubodup, craigsmith, martian, Woodingp, worthahep88, tgerginov, wyskoj, audiojacked, SvennSound (CC0), <a href="https://freesound.org/people/juskiddink/" target="_blank" rel="noopener">juskiddink</a>, <a href="https://freesound.org/people/klankbeeld/" target="_blank" rel="noopener">klankbeeld</a> and <a href="https://freesound.org/people/KVV_Audio/" target="_blank" rel="noopener">KVV_Audio</a> (<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>) &middot; radio voices: <a href="https://huggingface.co/hexgrad/Kokoro-82M" target="_blank" rel="noopener">Kokoro-82M</a> (Apache-2.0) &mdash; full list in <a href="audio/CREDITS.txt" target="_blank">audio/CREDITS.txt</a></div>
     </div>
   </div>
@@ -52,7 +84,7 @@
 <div id="pause" class="panel-wrap hidden">
   <div class="panel small">
     <h2>PAUSED</h2>
-    <div class="btns"><button id="resume">RESUME</button><button id="quit">QUIT TO MENU</button></div>
+    <div class="btns"><button id="resume">RESUME</button><button id="retry-coast-pause" data-raid-start="coast" class="hidden">RETRY FROM DUTCH COAST</button><button id="quit">QUIT TO MENU</button></div>
     <p class="hint">Click the screen to recapture the mouse.</p>
   </div>
 </div>
@@ -73,7 +105,8 @@
     <h1>VICTORY</h1>
     <p class="sub"></p>
     <div class="stats"></div>
-    <div class="btns"><button id="again">FLY AGAIN</button><button id="menu">MAIN MENU</button></div>
+    <p class="debrief-note hidden"></p>
+    <div class="btns"><button id="continue-home" class="hidden">CONTINUE HOME · LANDING BONUS</button><button id="retry-coast" data-raid-start="coast" class="hidden">RETRY FROM DUTCH COAST</button><button id="again">FLY AGAIN</button><button id="menu">MAIN MENU</button></div>
   </div>
 </div>
 

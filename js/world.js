@@ -58,9 +58,9 @@ const TOWNS = [
 ];
 
 // ---------------------------------------------------------------- terrain generation
-function fieldMask(x, z) {
+function fieldMask(x, z, fields) {
   let m = 0, e = 0;
-  for (const f of FIELDS) {
+  for (const f of fields) {
     const [u, v] = worldToField(f, x, z);
     const d = Math.max(Math.abs(u) - 1150, Math.abs(v) - 650, 0);
     const k = 1 - smoothstep(0, 700, d);
@@ -70,7 +70,14 @@ function fieldMask(x, z) {
 }
 
 export class World {
-  constructor() {
+  constructor({ scenario = 'channel' } = {}) {
+    this.scenario = scenario;
+    const raid = scenario === 'factory' || scenario === 'convoy';
+    this.fields = raid ? [makeField(TEAM.RAF, 'RAF HAWKINGE', -1800, -9200, Math.PI, 62),
+      makeField(TEAM.LW, 'OCCUPIED DUTCH AIRFIELD', 12000, 16000, 0, 18)] : FIELDS.map((f) => ({ ...f }));
+    this.towns = raid ? [...TOWNS.filter((t) => t.side === 0),
+      { name: 'EINDHOVEN', x: 500, z: 12300, r: 1000, n: 320, side: 1, church: 2 },
+      { name: 'DUTCH FARMLAND', x: -4500, z: 6500, r: 500, n: 75, side: 1, church: 1 }] : TOWNS;
     const t0 = Date.now();
     const N = HM_N;
     this.N = N; this.cell = HM_CELL; this.x0 = HM_X0;
@@ -78,10 +85,10 @@ export class World {
     this.mat = new Uint8Array(N * N * 4);     // r forest, g town, b airfield, a chalk
     this.nrm = new Uint8Array(N * N * 4);
     const cN = new Float32Array(N), cS = new Float32Array(N), clN = new Float32Array(N), clS = new Float32Array(N);
-    for (let i = 0; i < N; i++) { const x = HM_X0 + i * HM_CELL; cN[i] = coastN(x); cS[i] = coastS(x); clN[i] = cliffN(x); clS[i] = cliffS(x); }
+    for (let i = 0; i < N; i++) { const x = HM_X0 + i * HM_CELL; cN[i] = coastN(x); cS[i] = coastS(x); clN[i] = cliffN(x); clS[i] = raid ? 0 : cliffS(x); }
     const townMaskAt = (x, z) => {
       let m = 0;
-      for (const t of TOWNS) { const d2 = ((x - t.x) ** 2 + (z - t.z) ** 2) / (t.r * t.r); if (d2 < 2.5) m = Math.max(m, Math.exp(-d2 * 1.6)); }
+      for (const t of this.towns) { const d2 = ((x - t.x) ** 2 + (z - t.z) ** 2) / (t.r * t.r); if (d2 < 2.5) m = Math.max(m, Math.exp(-d2 * 1.6)); }
       return m;
     };
     for (let j = 0; j < N; j++) {
@@ -98,6 +105,7 @@ export class World {
           : 32 + (hn - 0.45) * 170 + 45 * Math.exp(-(((z - 7000 - 700 * Math.sin(x / 3900 + 1)) / 2200) ** 2));
         land += (fbm(x / 900, z / 900, 3) - 0.5) * 18;
         land = Math.max(land, 6);
+        if (raid && !north) land = 12 + (hn - 0.4) * 16;
         if (cliff > 0) land = Math.max(land, lerp(land, 78 + 40 * vnoise(x / 1500, 7.7), cliff));
         let h;
         if (d < 0) {
@@ -109,7 +117,13 @@ export class World {
           h = 1.2 + (land - 1.2) * s;
           if (d < 60 && cliff < 0.4) h = Math.min(h, 1.2 + d * 0.03);   // beaches
         }
-        const [fm, fe] = fieldMask(x, z);
+        // Broad, flat Dutch polders, crossed by drainage canals. Geography is compressed for the film.
+        if (raid && !north && d > 900) {
+          const canal = Math.min(Math.abs(z - 6200), Math.abs(z - 8800), Math.abs(x + 4200));
+          h = lerp(-3, h, smoothstep(18, 65, canal));
+          if (Math.abs(x + 1800) < 380 && Math.abs(z - 11500) < 420) h = 16;
+        }
+        const [fm, fe] = fieldMask(x, z, this.fields);
         if (fm > 0 && h > 0) h = lerp(h, fe, fm);
         const k = j * N + i;
         this.h[k] = h;
@@ -138,8 +152,6 @@ export class World {
       }
     }
     this.genTime = Date.now() - t0;
-    this.fields = FIELDS;
-    this.towns = TOWNS;
     this.placeObjects();
   }
 
@@ -175,7 +187,8 @@ export class World {
     this.add = add;
     const nearField = (x, z, m = 0) => this.fields.some((f) => { const [u, v] = worldToField(f, x, z); return Math.abs(u) < 1250 + m && Math.abs(v) < 760 + m; });
     // houses
-    for (const t of TOWNS) {
+    const nearFactory = (x, z) => (this.scenario === 'factory' && Math.abs(x + 1800) < 430 && Math.abs(z - 11500) < 470) || (!['channel', 'factory', 'convoy'].includes(this.scenario) && Math.abs(x + 7000) < 450 && Math.abs(z - 11000) < 500);
+    for (const t of this.towns) {
       let placed = 0, tries = 0;
       // a few streets: houses line up along random directions through the centre
       const streets = [];
@@ -186,7 +199,7 @@ export class World {
         const along = (rnd() * 2 - 1) * t.r * 1.2, off = (rnd() < 0.5 ? -1 : 1) * (14 + rnd() * 10) + (rnd() - 0.5) * t.r * 0.6 * rnd();
         const x = t.x + Math.cos(st) * along - Math.sin(st) * off, z = t.z + Math.sin(st) * along + Math.cos(st) * off;
         const h = this.heightAt(x, z);
-        if (h < 2 || this.slopeAt(x, z) < 0.93 || nearField(x, z, 100)) continue;
+        if (h < 2 || this.slopeAt(x, z) < 0.93 || nearField(x, z, 100) || nearFactory(x, z)) continue;
         const r = rnd();
         add(r < 0.45 ? 'house1' : r < 0.8 ? 'house2' : 'house3', x, z, -st + (rnd() < 0.5 ? 0 : Math.PI), 0.85 + rnd() * 0.35);
         placed++;
@@ -204,7 +217,7 @@ export class World {
     for (let k = 0; k < 420; k++) {
       const x = (rnd() * 2 - 1) * 21000, z = (rnd() * 2 - 1) * 21000;
       const h = this.heightAt(x, z);
-      if (h < 3 || this.slopeAt(x, z) < 0.95 || nearField(x, z, 200) || this.matAt(x, z, 0) > 0.3) continue;
+      if (h < 3 || this.slopeAt(x, z) < 0.95 || nearField(x, z, 200) || nearFactory(x, z) || this.matAt(x, z, 0) > 0.3) continue;
       const yaw = rnd() * 6.28;
       add(rnd() < 0.5 ? 'house1' : 'house2', x, z, yaw, 1);
       if (rnd() < 0.6) add('house3', x + Math.cos(yaw) * 22, z + Math.sin(yaw) * 22, yaw + 1.57, 0.8);
@@ -219,7 +232,7 @@ export class World {
         const p = f > 0.5 ? 0.8 : 0.008;
         if (rnd() > p) continue;
         const h = this.heightAt(jx, jz);
-        if (h < 3 || nearField(jx, jz) || this.matAt(jx, jz, 1) > 0.25 || this.slopeAt(jx, jz) < 0.8) continue;
+        if (h < 3 || nearField(jx, jz) || nearFactory(jx, jz) || this.matAt(jx, jz, 1) > 0.25 || this.slopeAt(jx, jz) < 0.8) continue;
         trees.push([jx, h, jz, rnd() * 6.28, 0.75 + rnd() * 0.6, rnd() < (z < 0 ? 0.35 : 0.55) ? 1 : 0]);
       }
     }
@@ -234,12 +247,102 @@ export class World {
     // ---------------------------------------------------------- airfields
     this.targets = [];
     for (const f of this.fields) this.buildField(f, rnd, true);
+    if (this.scenario === 'factory') this.buildFactory(true);
+    else if (this.scenario !== 'channel') this.buildOperation();
   }
   // fresh airfield targets for a new battle (the decorative scenery stays)
   resetTargets() {
     const rnd = mulberry32(1941);
     this.targets = [];
     for (const f of this.fields) this.buildField(f, rnd, false);
+    if (this.scenario === 'factory') this.buildFactory(false);
+    else if (this.scenario !== 'channel') this.buildOperation();
+  }
+
+  buildOperation() {
+    const convoy = this.scenario === 'convoy', norway = this.scenario === 'norway', precision = this.scenario === 'precision';
+    const f = this.operationTarget = { name: convoy ? 'MERCHANT CONVOY' : norway ? 'COASTAL SHIPPING' : precision ? 'HEADQUARTERS' : 'SUPPLY DEPOT',
+      x: (convoy || norway) ? -1500 : -7000, z: (convoy || norway) ? 800 : 11000, y: 0, halls: [], guns: [], protected: [] };
+    f.y = this.groundAt(f.x, f.z);
+    const add = (kind, x, z, r, h, hp, extra = {}) => {
+      const t = { kind, operationTarget: true, team: TEAM.LW, field: this.fields[1], x, z, y: this.groundAt(x,z),
+        yaw: 0, r, h, hp, maxHp: hp, alive: true, ...extra };
+      this.targets.push(t); return t;
+    };
+    if (norway) {
+      // Six merchants in two columns, a destroyer on the exposed flank, and a U-boat.
+      for(let i=0;i<6;i++) f.halls.push(add('ship',f.x+(i%3)*650,f.z-Math.floor(i/3)*650,55,14,220,
+        {y:0,yaw:-Math.PI/2,speed:4.5,length:105,beam:15,escort:false,sink:0}));
+      f.halls.push(add('ship',f.x+650,f.z+700,64,17,460,
+        {y:0,yaw:-Math.PI/2,speed:4.5,length:128,beam:12,escort:true,destroyer:true,sink:0}));
+      f.halls.push(add('ship',f.x+1800,f.z+450,35,12,160,
+        {y:0,yaw:-Math.PI/2,speed:4.5,length:65,beam:8,escort:true,submarine:true,sink:0}));
+    } else if (convoy) {
+      for (let i=0;i<3;i++) f.halls.push(add('ship', f.x + i*650, f.z + (i===2?450:0), i===2?35:55, 14, i===2?160:220,
+        { y: 0, yaw: -Math.PI/2, speed: 4.5, length: i===2?65:105, beam: i===2?10:15, escort: i===2, sink: 0 }));
+    } else {
+      for (let i=0;i<(precision?1:3);i++) f.halls.push(add('objective', f.x+i*110, f.z, precision?18:45, precision?13:20, precision?65:110));
+      if (precision) for (let i=0;i<3;i++) f.protected.push(add('housing', f.x+100, f.z-85+i*85, 21, 13, 40, { team: TEAM.RAF }));
+    }
+    f.obstacles=[...f.halls,...f.protected];
+    if(norway) {
+      for(const vessel of f.halls) {
+        // Mount coordinates follow the ship's heading, rather than sharing its centre.
+        const mounts=vessel.destroyer?[[0,-35,10,false],[0,31,10,false],[-3,-8,13,true],[3,12,13,true]]:
+          [[0,vessel.submarine?5:25,vessel.submarine?7:10,false]];
+        for(const [mountX,mountZ,mountY,heavy] of mounts) {
+          const sin=Math.sin(vessel.yaw),cos=Math.cos(vessel.yaw);
+          f.guns.push(add(heavy?'flak':'lightAA',vessel.x+cos*mountX+sin*mountZ,vessel.z-sin*mountX+cos*mountZ,4,2.5,heavy?42:24,
+            {y:mountY,vessel,mountX,mountZ,mountY,raidGun:true,heavy,range:heavy?3600:1800,minAlt:heavy?90:3,
+              reaction:1.4,reload:4,shotGap:.4,burstLength:4,burstPause:2.8,damageScale:.5,aimError:1.4,
+              aimYaw:0,aimPitch:.4,cool:f.guns.length*.17}));
+        }
+      }
+      return;
+    }
+    const positions = (convoy || norway) ? [[0,0,false],[650,0,false],[1300,450,true]] : [[-350,-600,false],[350,400,false],[-850,800,true],[850,-600,true]];
+    positions.forEach(([dx,dz,heavy],i) => {
+      const gun=add(heavy?'flak':'lightAA',f.x+dx,f.z+dz,4,2.5,heavy?42:24,
+        { raidGun:true, heavy, range:heavy?3400:1800, minAlt:heavy?70:3, reaction:1.3, reload:3.2,
+          shotGap:.35, burstLength:4, burstPause:2.4, damageScale:.65, aimError:1.3, aimYaw:0, aimPitch:.4, cool:i*.2 });
+      if(convoy || norway) { gun.vessel=f.halls[i]; gun.y=10; }
+      f.guns.push(gun);
+    });
+  }
+
+  buildFactory(decor) {
+    this.factory = { name: 'WIRELESS & VALVE WORKS', x: -1800, z: 11500, y: 16, halls: [], guns: [] };
+    const f = this.factory;
+    for (const dx of [-200, -100, 0, 100, 200]) for (const dz of [-150, 0, 150]) {
+      const t = { kind: 'factory', team: TEAM.LW, field: this.fields[1], x: f.x + dx, z: f.z + dz,
+        y: 16, yaw: 0, hp: 110, maxHp: 110, r: 60, h: 20, alive: true };
+      this.targets.push(t); f.halls.push(t);
+    }
+    for (let k = 0; k < 3; k++) this.targets.push({ kind: 'fuel', team: TEAM.LW, field: this.fields[1],
+      x: f.x + 280, z: f.z - 130 + k * 32, y: 16, yaw: 0, hp: 25, maxHp: 25, r: 6, h: 6, alive: true });
+    // Approach, perimeter and escape batteries. Low flight avoids the heavy guns;
+    // light AA still makes a straight, slow pass dangerous.
+    const batteries = [
+      [-650, -2400, false], [720, 1900, false],
+      [-360, -320, false], [360, -320, false], [-360, 320, false], [360, 320, false],
+      [-900, 800, true], [900, -900, true],
+    ];
+    for (let i = 0; i < batteries.length; i++) {
+      const [dx, dz, heavy] = batteries[i], x = f.x + dx, z = f.z + dz;
+      const gun = { kind: heavy ? 'flak' : 'lightAA', raidGun: true, heavy, team: TEAM.LW, field: this.fields[1],
+        x, z, y: this.groundAt(x, z), yaw: 0, hp: heavy ? 42 : 24, maxHp: heavy ? 42 : 24,
+        r: heavy ? 5 : 3.5, h: 2.5, alive: true, aimYaw: 0, aimPitch: 0.4, cool: i * 0.15,
+        range: heavy ? 3400 : 1700, minAlt: heavy ? 70 : 3, reaction: heavy ? 1.6 : 1.0,
+        reload: 2.8, shotGap: 0.32, burstLength: 4, burstPause: 2.2, damageScale: 0.8,
+        aimError: heavy ? 1.15 : 1.25 };
+      this.targets.push(gun); f.guns.push(gun);
+      if (decor) this.add(heavy ? 'flakBase' : 'sandbags', x, z, 0, heavy ? 1 : 1.2);
+    }
+    if (decor) {
+      this.add('factoryOffice', f.x, f.z - 285, 0, 1, 16);
+      for (const dx of [-280, 280]) this.add('factoryChimney', f.x + dx, f.z + 230, 0, 1, 16);
+      for (let k = 0; k < 4; k++) this.add('windmill', -3400 - k * 650, 5200 + k * 1300, 0, 1);
+    }
   }
 
   buildField(f, rnd, decor) {

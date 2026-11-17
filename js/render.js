@@ -693,6 +693,11 @@ export class Renderer {
   // a model mesh + its instance buffer (16 floats per instance for dynamic, 8 for static)
   addMesh(name, m, maxInst = 256, stat = false) {
     const gl = this.gl;
+    const old = this.meshes[name];
+    if (old) {
+      gl.deleteVertexArray(old.vao);
+      for (const buffer of [old.vbo, old.ibo, old.inst]) gl.deleteBuffer(buffer);
+    }
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     const vbo = this.buffer(m.data);
@@ -732,9 +737,12 @@ export class Renderer {
   initTerrain(world) {
     const gl = this.gl;
     this.world = world;
+    for (const tex of [this.hTex, this.nTex, this.mTex]) if (tex) gl.deleteTexture(tex);
     this.hTex = this.tex2D(HM_N, HM_N, gl.R32F, gl.RED, gl.FLOAT, world.h, false);
     this.nTex = this.tex2D(HM_N, HM_N, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, world.nrm, true);
     this.mTex = this.tex2D(HM_N, HM_N, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, world.mat, true);
+    this.hMin = -50; this.hMax = 0; for (const h of world.h) if (h > this.hMax) this.hMax = h;
+    if (this.tFull) return; // A scenario switch only replaces the height/material textures.
     // grid patch 32x32 cells
     const G = 32, verts = new Float32Array((G + 1) * (G + 1) * 2);
     for (let j = 0; j <= G; j++) for (let i = 0; i <= G; i++) { verts[(j * (G + 1) + i) * 2] = i; verts[(j * (G + 1) + i) * 2 + 1] = j; }
@@ -772,7 +780,6 @@ export class Renderer {
       const start = lo + (hi - lo) * 0.62;
       this.morph[L * 4] = start; this.morph[L * 4 + 1] = 1 / (hi * 0.97 - start);
     }
-    this.hMin = -50; this.hMax = 0; for (const h of world.h) if (h > this.hMax) this.hMax = h;
     this.planes = new Float32Array(24);
   }
 

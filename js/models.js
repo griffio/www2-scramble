@@ -649,6 +649,69 @@ function mosquito() {
   });
 }
 
+// ==================================================================== Bristol Beaufighter
+// Broad wings, a short blunt nose, two Hercules radial cowlings and a separate observer's blister.
+function beaufighter() {
+  const b = new MeshBuilder(), g = new MeshBuilder();
+  const fus = new Body([
+    [-5.8, 0.16, 0.2, 0.25], [-5.4, 0.62, 0.6, 0.65], [-4.2, 0.76, 0.76, 0.8],
+    [-2.5, 0.78, 0.8, 0.86], [0, 0.72, 0.7, 0.78], [2.8, 0.5, 0.52, 0.55],
+    [5.4, 0.25, 0.35, 0.28], [6.8, 0.06, 0.12, 0.1],
+  ]);
+  const wing = new Wing([[0, 3.95, -1.5], [3, 3.6, -1.3], [5.5, 2.7, -0.9], [7.7, 1.8, -0.4], [8.65, 1.1, 0], [8.82, 0.25, 0.5]]
+    .map(([x, chord, z]) => ({ x, y: -0.3 + x * 0.045, z, chord, thick: 0.14 })));
+  const tail = new Wing([[0, 2.1, 4.6], [1.5, 1.8, 4.8], [2.8, 1.1, 5.2], [3.2, 0.3, 5.6]]
+    .map(([x, chord, z]) => ({ x, y: 0.35 + x * 0.18, z, chord, thick: 0.1 })));
+  const fin = new Wing([[0.2, 2.4, 4.7], [1.2, 2, 5], [2.1, 1.3, 5.4], [2.5, 0.4, 5.9]]
+    .map(([x, chord, z]) => ({ x, z, chord, thick: 0.1 })));
+  const mark = b.mark();
+  wing.build(b); tail.build(b);
+  roundelB(b, wing.proj(1), 6, 0.25, 0.88);
+  const nx = 3.05;
+  const nac = new Body([[-4, 0.87, 0.87, 0.87], [-3.65, 0.92, 0.92, 0.92], [-2.5, 0.9, 0.9, 0.9], [-1.4, 0.7, 0.68, 0.9], [1.5, 0.48, 0.42, 0.7], [2.8, 0.07, 0.08, 0.1]]);
+  b.push(T(nx, -0.1, 0));
+  loftM(b, nac.rings(0.3, 24), splitMat(24, 15), { capStart: true, capEnd: true });
+  b.disc([0, 0, -4.015], [0, 0, -1], 0.76, 24, COL.intake, MAT.PLAIN);
+  // Visible radial cylinders and collector ring behind the small spinner.
+  for (let i = 0; i < 14; i++) {
+    const th = i / 14 * TAU;
+    bar(b, [Math.cos(th) * 0.25, Math.sin(th) * 0.25, -4.04], [Math.cos(th) * 0.69, Math.sin(th) * 0.69, -4.04], 0.075, COL.exhaust, MAT.METAL, 6);
+  }
+  spinner(b, 0, 0, -4.05, -4.5, 0.25, COL.black, MAT.PLAIN, 18, 0.7);
+  b.pop();
+  const rack = wing.at(4.5);
+  b.box(4.5, rack.y - 0.25, 0.3, 0.12, 0.28, 1, W, MAT.UNDER);
+  for (const x of [5.1, 5.5, 5.9]) bar(b, [x, wing.at(x).y, wing.at(x).z], [x, wing.at(x).y, wing.at(x).z - 0.2], 0.022, COL.gun, MAT.METAL, 6);
+  b.mirrorX(mark.v, mark.i);
+  loftM(b, fus.rings(0.3, 24), splitMat(24, 15), { capStart: true, capEnd: true });
+  const can = new Body([[-4.6, 0.44, 0.05, 0.1, 0.55], [-4.1, 0.53, 0.62, 0.1, 0.55], [-3.3, 0.52, 0.68, 0.1, 0.55], [-2.8, 0.4, 0.15, 0.1, 0.55]]);
+  canopyLoft(b, can, 0.15);
+  canopyFrames(b, can, [-4.1, -3.3], [0.1, 0.8, PI - 0.8, PI - 0.1], -4.5, -2.9, 0.025);
+  const obs = new Body([[0.4, 0.25, 0.03, 0.1, 0.58], [0.8, 0.38, 0.44, 0.1, 0.58], [1.5, 0.35, 0.38, 0.1, 0.58], [1.9, 0.2, 0.02, 0.1, 0.58]]);
+  canopyLoft(b, obs, 0.15);
+  canopyFrames(b, obs, [0.8, 1.5], [0.1, PI / 2, PI - 0.1], 0.5, 1.8, 0.02);
+  for (const x of [-0.42, -0.14, 0.14, 0.42]) bar(b, [x, -0.56, -4.5], [x, -0.56, -5.32], 0.035, COL.gun, MAT.METAL, 6);
+  b.push(RZ(PI / 2)); fin.build(b, W, MAT.CAMO, W, MAT.CAMO); b.pop();
+  for (const side of [-1, 1]) roundelC1(b, (u, v, o = 0) => fus.side(u, v, side, 0.015 + o), 3.4, 0.02, 0.39);
+  fuselageCodes(b, fus, 3.4, 0.02, 0.39, 'NE', 'B', 0.44, COL.codes);
+  const gm = g.mark();
+  strut(g, [nx, -0.6, -0.6], [nx, -2, -0.6], 0.09);
+  wheel(g, [nx, -2, -0.6], 0.5, 0.25);
+  g.mirrorX(gm.v, gm.i);
+  strut(g, [0, -0.1, 5.6], [0, -0.7, 5.8], 0.05);
+  wheel(g, [0, -0.7, 5.8], 0.2, 0.12);
+  return finish(b, g, {
+    fixedGear: false, camo: { a: [0.29, 0.32, 0.28], b: [0.22, 0.23, 0.2], under: [0.57, 0.63, 0.62], scale: 3 },
+    props: [-nx, nx].map((x) => ({ x, y: -0.1, z: -4.3, r: 1.8, blades: 3, dir: 1 })),
+    guns: [...[-0.42, -0.14, 0.14, 0.42].map((x) => ({ x, y: -0.56, z: -5.32, kind: 'cannon' })),
+      ...[-5.9, -5.5, -5.1, 5.1, 5.5, 5.9].map((x) => ({ x, y: wing.at(Math.abs(x)).y, z: wing.at(Math.abs(x)).z - 0.2, kind: 'mg' }))],
+    gunners: [], hardpoints: [-4.5, 4.5].map((x) => ({ x, y: -0.6, z: 0.3, kind: 'bomb500' })),
+    mainWheel: [nx, -2.5, -0.6], tailWheel: [0, -0.9, 5.8], cockpit: [0, 1.08, -3.85],
+    exhausts: [-nx, nx].map((x) => ({ x: x + 0.85, y: -0.25, z: -2.5 })),
+    engines: [-nx, nx].map((x) => ({ x, y: -0.1, z: -2.8 })),
+  });
+}
+
 // ==================================================================== Bf 109 G
 function bf109() {
   const b = new MeshBuilder(), g = new MeshBuilder(), K = 24;
@@ -1022,6 +1085,46 @@ const SC = {
 
 // arch profile of a curved-roof hangar
 const hangarArc = (n, W2 = 25, Hw = 8, Hr = 14) => { const out = []; for (let i = 0; i <= n; i++) { const a = PI - (PI * i) / n; out.push([W2 * Math.cos(a), Hw + (Hr - Hw) * Math.sin(a)]); } return out; };
+
+function factoryHall(ruin = false) {
+  const b = new MeshBuilder(), brick = [0.43, 0.28, 0.21], concrete = [0.5, 0.49, 0.44], roof = [0.25, 0.28, 0.29];
+  b.box(0, 0.3, 0, 80, 0.6, 120, concrete, MAT.PLAIN);
+  if (ruin) {
+    for (let z = -50; z <= 50; z += 20) {
+      b.box(-39, 3, z, 2, 6, 9, brick, MAT.PLAIN); b.box(39, 4, z, 2, 8, 7, brick, MAT.PLAIN);
+      b.box(Math.sin(z) * 20, 1.5, z, 25, 3, 13, roof, MAT.PLAIN);
+      bar(b, [-35, 2, z], [12, 8, z + 9], 0.5, roof, MAT.METAL, 4);
+    }
+  } else {
+    b.box(0, 7, 0, 80, 14, 120, brick, MAT.PLAIN);
+    for (let z = -60; z < 60; z += 20) {
+      // Northlight sawtooth roofs, with glazed vertical faces.
+      b.quad([-40, 14, z], [40, 14, z], [40, 20, z + 16], [-40, 20, z + 16], roof, MAT.PLAIN);
+      b.quad([-40, 20, z + 16], [40, 20, z + 16], [40, 14, z + 20], [-40, 14, z + 20], [0.45, 0.58, 0.6], MAT.GLASS);
+      for (const x of [-40.04, 40.04]) b.box(x, 8, z + 10, 0.1, 5, 12, [0.28, 0.38, 0.4], MAT.GLASS);
+      b.tri([-40, 14, z], [-40, 20, z + 16], [-40, 14, z + 20], brick, MAT.PLAIN);
+      b.tri([40, 14, z], [40, 14, z + 20], [40, 20, z + 16], brick, MAT.PLAIN);
+    }
+    for (let x = -30; x <= 30; x += 15) b.box(x, 8, -60.05, 9, 5, 0.1, [0.28, 0.38, 0.4], MAT.GLASS);
+  }
+  return b.build();
+}
+
+function factoryOffice() {
+  const b = new MeshBuilder();
+  b.box(0, 14, 0, 120, 28, 28, [0.53, 0.37, 0.27], MAT.PLAIN);
+  b.box(0, 28.5, 0, 124, 1, 31, [0.3, 0.32, 0.31], MAT.PLAIN);
+  for (let x = -53; x < 58; x += 9) for (let y = 5; y < 27; y += 7) for (const z of [-14.05, 14.05]) b.box(x, y, z, 4, 4, 0.1, [0.34, 0.43, 0.45], MAT.GLASS);
+  b.box(0, 3, -14.1, 9, 6, 0.2, [0.17, 0.2, 0.2], MAT.PLAIN);
+  return b.build();
+}
+
+function factoryChimney() {
+  const b = new MeshBuilder();
+  b.cylinder([0, 0, 0], [0, 65, 0], 4.8, 2.6, 16, [0.48, 0.29, 0.21], MAT.PLAIN);
+  b.cylinder([0, 62, 0], [0, 65, 0], 3, 3, 16, [0.25, 0.24, 0.22], MAT.PLAIN);
+  return b.build();
+}
 
 function hangar() {
   const b = new MeshBuilder();
@@ -1514,12 +1617,145 @@ function wreck() {
   return b.build();
 }
 
+// Allied medium/heavy bombers and Mustang: original procedural silhouettes.
+function alliedAircraft(kind) {
+  const fortress=kind==='b17', fighter=kind==='p51';
+  const span=fortress?31.6:fighter?11.28:18.7, length=fortress?22.7:fighter?9.83:14.6;
+  const half=span/2, nose=-length*.44, tail=length*.56, radius=fortress?1.12:fighter?.48:.78;
+  const b=new MeshBuilder(),g=new MeshBuilder(),K=20;
+  const body=new Body([[nose,.05,.05,.05,0,2],[nose+.7,radius*.7,radius*.65,radius*.65,0,2],
+    [nose+2,radius,radius,radius,0,2],[-.5,radius,radius*.95,radius,0,2],[length*.22,radius*.7,radius*.8,radius*.7,.1,2],
+    [tail-1,radius*.28,radius*.4,radius*.3,.2,2],[tail,.08,.15,.1,.2,2]]);
+  const skin=splitMat(K,15,solid(COL.intake,MAT.PLAIN));
+  loftM(b,body.rings(.45,K),(r,k,p,cap)=>!fighter&&p[2]<nose+1.7 ? solid([.2,.3,.38],MAT.GLASS) : skin(r,k,p,cap),{capStart:true,capEnd:true});
+  const wing=new Wing([{x:0,z:-length*.16,chord:length*.31,thick:.12,y:-.1},
+    {x:half*.45,z:-length*.13,chord:length*.24,thick:.11,y:.05},
+    {x:half*.96,z:-length*.04,chord:length*.11,thick:.09,y:.35},
+    {x:half,z:0,chord:length*.07,thick:.07,y:.38}]);
+  const tailplane=new Wing([{x:0,z:tail-length*.17,chord:length*.16,thick:.1,y:.25},
+    {x:half*.36,z:tail-length*.11,chord:length*.09,thick:.08,y:.3}]);
+  const m=b.mark();wing.build(b);tailplane.build(b);b.mirrorX(m.v,m.i);
+  b.push(RZ(PI/2));
+  new Wing([{x:.3,z:tail-length*.21,chord:length*.21,thick:.1},
+    {x:fortress?4.5:fighter?2.1:2.8,z:tail-length*.1,chord:length*.095,thick:.08}]).build(b);
+  b.pop();
+  const can=new Body([[nose+length*.19,.18,.08,.1,radius*.8,2],[nose+length*.23,radius*.65,radius*.75,.1,radius*.8,2],
+    [nose+length*.33,radius*.7,radius*.75,.1,radius*.8,2],[nose+length*.4,.16,.12,.1,radius*.8,2]]);
+  canopyLoft(b,can,.18);canopyFrames(b,can,[nose+length*.23,nose+length*.34],[.02,PI-.02],nose+length*.2,nose+length*.39,.025);
+  if(!fighter) {
+    const glass=new Body([[nose-.02,.03,.04,.04,0,2],[nose+.5,radius*.55,radius*.55,radius*.5,0,2],[nose+1.5,radius*.95,radius*.8,radius*.8,0,2]]);
+    canopyLoft(b,glass,.2);canopyFrames(b,glass,[nose+.5,nose+1.4],[.1,PI/2,PI-.1],nose,nose+1.5,.025);
+    // Dorsal and rear positions, plus the Fortress ball turret.
+    b.cylinder([0,radius*.7,length*.13],[0,radius*1.35,length*.13],radius*.55,radius*.45,12,COL.gun,MAT.METAL,true);
+    bar(b,[0,radius*1.3,length*.13],[0,radius*1.4,length*.13+2],.035,COL.gun);
+    if(fortress) b.cylinder([0,-radius*.7,1],[0,-radius*1.7,1],.55,.35,12,COL.gun,MAT.METAL,true);
+  }
+  const engines=fighter?[0]:fortress?[-half*.67,-half*.33,half*.33,half*.67]:[-half*.38,half*.38];
+  const props=[];
+  for(const x of engines) {
+    const r=fighter?.46:fortress?.78:.82, z=fighter?nose+1:-length*.18;
+    if(!fighter) {
+      const nacelle=new Body([[z-1.35,.08,.08,.08,-.15,2],[z-1.1,r,r,r,-.15,2],[z+1,r*.9,r*.85,r*1.1,-.15,2],[z+3,.15,.18,.2,-.15,2]]);
+      b.push(T(x,0,0));loftM(b,nacelle.rings(.4,16),splitMat(16,10,solid(COL.intake,MAT.PLAIN)),{capStart:true,capEnd:true});b.pop();
+      b.disc([x,-.15,z-1.12],[0,0,-1],r*.85,16,COL.intake,MAT.PLAIN);
+    }
+    const pz=fighter?nose-.1:z-1.45;
+    spinner(b,x,fighter?0:-.15,pz+.25,pz-.3,r*.5,COL.hub,MAT.METAL,14,.75);
+    props.push({x,y:fighter?0:-.15,z:pz,r:fighter?1.65:fortress?1.75:1.6,blades:fighter?4:3,dir:1});
+  }
+  if(fighter) {b.box(0,-.68,.8,.7,.55,1.5,W,MAT.UNDER);b.box(0,-.75,.18,.48,.25,.03,COL.intake,MAT.PLAIN);}
+  const main=[fighter?1.3:half*.36,fighter?-1.8:-2.3,kind==='boston'?1.3:-.4];
+  for(const side of [-1,1]) {strut(g,[main[0]*side,-.2,0],[main[0]*side,main[1],main[2]],.08);wheel(g,[main[0]*side,main[1],main[2]],fighter?.34:.48,.2);}
+  const tw=kind==='boston'?[0,-2.4,-length*.3]:[0,fighter?-.7:-1,tail-.4];
+  const twr=kind==='boston'?.3:.2;wheel(g,tw,twr,.12);strut(g,[0,-.2,tw[2]],tw,.05);
+  const guns=fighter?mirrorPts([2.3,2.55,2.8].map(x=>({x,y:0,z:wing.at(x).z-.1,kind:'hmg'}))):[];
+  for(const gun of guns)bar(b,[gun.x,gun.y,gun.z+.3],[gun.x,gun.y,gun.z-.35],.025,COL.gun);
+  // Markings follow the wing surface, so they remain visible over the airfoil curvature.
+  const marking=(u,v,o=0)=>{const p=wing.surf(Math.abs(u),v,1,.025+o);p[0]*=Math.sign(u)||1;return p;};
+  for(const side of [-1,1]) {
+    const x=side*half*.65,z=wing.at(Math.abs(x)).z+wing.at(Math.abs(x)).chord*.45;
+    if(kind==='boston') roundelB(b,marking,x,z,.75);
+    else {
+      const r=fighter?.55:.95;
+      const rect=(w,h,col,o)=>b.quad(marking(x-w,z-h,o),marking(x+w,z-h,o),marking(x+w,z+h,o),marking(x-w,z+h,o),col,MAT.MARK);
+      rect(r*1.7,r*.35,COL.rafBlue,0);rect(r*1.5,r*.23,COL.white,.006);
+      mAnnulus(b,marking,x,z,0,r,COL.rafBlue,.012);
+      const points=Array.from({length:10},(_,j)=>{const a=j*TAU/10,rad=r*(j%2?.38:.88);return marking(x+Math.sin(a)*rad,z-Math.cos(a)*rad,.025);});
+      for(let j=0;j<10;j++)b.tri(marking(x,z,.025),points[j],points[(j+1)%10],COL.white,MAT.MARK);
+    }
+  }
+  return finish(b,g,{fixedGear:false,internalBombs:!fighter,camo:{a:fortress||fighter?[.55,.57,.55]:[.25,.3,.19],b:fortress||fighter?[.42,.45,.42]:[.4,.34,.25],under:[.66,.69,.66],scale:2},props,guns,
+    gunners:fighter?[]:[{x:0,y:radius*1.3,z:length*.13,arc:'top'},{x:0,y:.4,z:tail-.2,arc:'rear'},...(fortress?[{x:0,y:-1.6,z:1,arc:'bottom'},{x:0,y:0,z:nose+.3,arc:'front'}]:[])],
+    hardpoints:fighter?[]:[-1,1].map(x=>({x,y:-radius-.25,z:0,kind:'bomb500'})),
+    mainWheel:[main[0],main[1]-(fighter?.34:.48),main[2]],tailWheel:[tw[0],tw[1]-twr,tw[2]],cockpit:[0,radius*1.6,nose+length*.27],
+    exhausts:engines.map(x=>({x:x+.6,y:0,z:-length*.14})),engines:engines.map(x=>({x,y:0,z:-length*.14}))});
+}
+
+function objectiveBuilding(housing=false) {
+  const b=new MeshBuilder(),wall=housing?[.65,.52,.4]:[.52,.48,.4];
+  b.box(0,6.5,0,32,13,40,wall,MAT.PLAIN);b.box(0,13.2,0,34,.7,42,[.22,.23,.23],MAT.PLAIN);
+  for(const side of [-1,1])for(let x=-12;x<=12;x+=6)for(const y of [4,9])b.box(x,y,side*20.05,2.2,2,.1,[.13,.2,.23],MAT.PLAIN);
+  b.box(0,2,20.15,4,4,.2,[.18,.16,.14],MAT.PLAIN);return b.build();
+}
+function merchantShip() {
+  const b=new MeshBuilder(), c=[.22,.26,.28];
+  // Pointed bow, broad cargo hull, raised bridge and two deck cargo hatches.
+  const pts=[[-7,0,42],[7,0,42],[8,0,-35],[0,0,-53],[-8,0,-35]];
+  for(let i=0;i<pts.length;i++){const a=pts[i],d=pts[(i+1)%pts.length];b.quad(a,d,[d[0],7,d[2]],[a[0],7,a[2]],c,MAT.PLAIN);}
+  b.box(0,6,0,14,2,82,[.34,.32,.28],MAT.PLAIN);
+  for(const z of [-24,8])b.box(0,8,z,10,3,19,[.24,.22,.2],MAT.PLAIN);
+  b.box(0,12,30,11,10,13,[.55,.56,.51],MAT.PLAIN);b.box(0,18,29,12,3,12,[.3,.33,.34],MAT.PLAIN);
+  b.box(0,22,24,3,9,3,[.15,.16,.16],MAT.PLAIN);
+  for(const z of [-28,8]) {bar(b,[0,8,z],[0,28,z],.25,COL.hub);bar(b,[0,23,z],[-6,13,z-12],.12,COL.hub);}
+  return b.build();
+}
+function escortDestroyer() {
+  const b=new MeshBuilder(),hull=[.25,.29,.32],deck=[.34,.35,.34],upper=[.43,.46,.47];
+  const pts=[[-4,0,57],[4,0,57],[6,0,36],[6,0,-43],[0,0,-64],[-6,0,-43],[-6,0,36]];
+  for(let i=0;i<pts.length;i++) {
+    const a=pts[i],c=pts[(i+1)%pts.length];
+    b.quad(a,c,[c[0],7,c[2]],[a[0],7,a[2]],hull,MAT.METAL);
+    b.tri([0,7,0],[a[0],7,a[2]],[c[0],7,c[2]],deck,MAT.PLAIN);
+  }
+  b.box(0,9,-16,9,4,28,upper,MAT.METAL);
+  b.box(0,14,-23,8,7,10,upper,MAT.METAL);b.box(0,18,-24,9,1.5,11,hull,MAT.METAL);
+  for(const z of [-5,12]) {b.box(0,13,z,4,12,5,hull,MAT.METAL);b.box(0,19.5,z,4.2,1,5.2,COL.gun,MAT.METAL);}
+  for(const z of [-47,43]) {
+    b.box(0,8.5,z,5,3,6,upper,MAT.METAL);
+    for(const x of [-1,1])bar(b,[x,9,z],[x,9,z+(z<0?-8:8)],.22,COL.gun,MAT.METAL,8);
+  }
+  bar(b,[0,13,-17],[0,31,-17],.22,hull,MAT.METAL,8);
+  bar(b,[-6,26,-17],[6,26,-17],.14,hull,MAT.METAL,6);
+  return b.build();
+}
+function submarine() {
+  const b=new MeshBuilder(),hull=[.19,.23,.24],deck=[.28,.3,.29];
+  b.cylinder([0,3,-33],[0,3,33],4.2,4.2,16,hull,MAT.METAL,true);
+  b.cylinder([0,3,30],[0,3,40],0,4.2,16,hull,MAT.METAL,true);
+  b.box(0,7,2,5,2,15,deck,MAT.METAL);b.box(0,10,2,3,5,5,[.35,.36,.34],MAT.METAL);
+  bar(b,[-2.5,12,0],[2.5,12,0],.18,COL.hub,MAT.METAL,8);
+  b.box(0,6,-32,8,1.2,2,[.2,.22,.22],MAT.METAL);return b.build();
+}
+function rocket25() {
+  const b=new MeshBuilder(),c=[.24,.28,.25];
+  b.cylinder([0,0,-.85],[0,0,.85],.045,.045,8,c,MAT.METAL,true);
+  b.cylinder([0,0,-1.05],[0,0,-.85],0,.045,8,COL.gun,MAT.METAL,true);
+  b.box(0,0,.65,.22,.015,.25,c,MAT.METAL);b.box(0,0,.65,.015,.22,.25,c,MAT.METAL);return b.build();
+}
+function torpedo() {
+  const b=new MeshBuilder();b.cylinder([0,0,-2.6],[0,0,2.6],.22,.22,14,[.38,.4,.4],MAT.METAL,true);
+  b.cylinder([0,0,-3],[0,0,-2.6],.04,.22,14,[.18,.2,.2],MAT.METAL,true);
+  b.box(0,0,2.3,.85,.05,.65,COL.hub,MAT.METAL);b.box(0,0,2.3,.05,.85,.65,COL.hub,MAT.METAL);return b.build();
+}
+
 // ==================================================================== export
 export function buildModels() {
   return {
-    aircraft: { spitfire: spitfire(), mosquito: mosquito(), bf109: bf109(), fw190: fw190(), ju87: ju87(), ju88: ju88() },
+    aircraft: { mosquitorp: (() => { const a=mosquito(); a.hardpoints=Array.from({length:8},(_,i)=>({x:(i%2?1:-1)*(4.1+Math.floor(i/2)*.42),y:-.75,z:-.4,kind:'rocket25'}));return a; })(), boston: alliedAircraft('boston'), b17: alliedAircraft('b17'), p51: alliedAircraft('p51'), torbeau: (() => { const a=beaufighter(); a.hardpoints=[{x:0,y:-1.25,z:0,kind:'torpedo18'}]; return a; })(), spitfire: spitfire(), mosquito: mosquito(), beaufighter: beaufighter(), bf109: bf109(), fw190: fw190(), ju87: ju87(), ju88: ju88() },
     props: { prop3: propeller(3), prop4: propeller(4) },
     statics: {
+      objective: objectiveBuilding(), housing: objectiveBuilding(true), ship: merchantShip(), destroyer: escortDestroyer(), rocket25: rocket25(), submarine: submarine(), torpedo18: torpedo(),
+      factoryHall: factoryHall(), factoryRuin: factoryHall(true), factoryOffice: factoryOffice(), factoryChimney: factoryChimney(),
       hangar: hangar(), hangarRuin: hangarRuin(), tower: tower(), fuelTank: fuelTank(), flakBase: flakBase(), flakGun: flakGun(),
       lightAA: lightAA(), tent: tent(), hut: hut(), house1: house1(), house2: house2(), house3: house3(), church: church(),
       windmill: windmill(), lighthouse: lighthouse(), radarMast: radarMast(), treePine: treePine(), treeOak: treeOak(),

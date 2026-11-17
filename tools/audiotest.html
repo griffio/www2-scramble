@@ -63,7 +63,7 @@
   <section>
     <h2>Player / misc</h2>
     <div>Hit: <button data-hit="0.2">light</button><button data-hit="0.6">medium</button><button data-hit="1">heavy</button></div>
-    <div><button id="bomb">Bomb release</button><button id="radio">Radio</button><button id="siren">Air-raid siren</button></div>
+    <div><button id="bomb">Bomb release</button><button id="rocket">Rocket launch</button><button id="rocketWing">Wingman rocket · 200 m</button><button id="radio">Radio</button><button id="siren">Air-raid siren</button></div>
     <div>Whiz-by: <button data-whiz="0">bullet</button><button data-whiz="1">20mm shell</button><button id="whizBurst">burst</button></div>
     <div>UI: <button data-ui="click">click</button><button data-ui="select">select</button><button data-ui="kill">kill</button><button data-ui="warn">warn</button><button data-ui="start">start</button><button data-ui="victory">victory</button><button data-ui="defeat">defeat</button></div>
   </section>
@@ -131,6 +131,8 @@ document.querySelectorAll('[data-imp]').forEach((b) => b.onclick = () => audio.i
 document.querySelectorAll('[data-hit]').forEach((b) => b.onclick = () => audio.playerHit(+b.dataset.hit));
 document.querySelectorAll('[data-ui]').forEach((b) => b.onclick = () => audio.ui(b.dataset.ui));
 $('bomb').onclick = () => audio.bombRelease();
+$('rocket').onclick = () => audio.rocketLaunch(null, true);
+$('rocketWing').onclick = () => audio.rocketLaunch(at(200, 60));
 document.querySelectorAll('[data-whiz]').forEach((b) => b.onclick = () => audio.whiz(at(3 + Math.random() * 6, Math.random() * 360), b.dataset.whiz === '1', 5));
 $('whizBurst').onclick = () => { for (let i = 0; i < 8; i++) setTimeout(() => audio.whiz(at(2 + Math.random() * 10, Math.random() * 360), Math.random() < 0.3, 6), i * 90 + Math.random() * 40); };
 $('radio').onclick = () => audio.radio();

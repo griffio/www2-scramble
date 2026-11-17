@@ -11,6 +11,8 @@ export const GUNS = {
 };
 export const BOMBS = {
   bomb500: { radius: 32, dmg: 75, mass: 227 },
+  rocket25: { radius: 0, dmg: 115, mass: 11, velocity: 320, life: 4 },
+  torpedo18: { radius: 38, dmg: 240, mass: 700 },
   bomb250: { radius: 24, dmg: 45, mass: 113 },
 };
 
@@ -29,6 +31,33 @@ export const TYPES = {
     power: 250, hp: 165, boost: 1.12,
     volleys: [{ kind: 'cannon', rate: 10, perVolley: 4, ammo: 150 }, { kind: 'mg', rate: 16, perVolley: 2, ammo: 500 }],
     converge: 350, bombs: 4, bombKind: 'bomb500', twin: true,
+  },
+  beaufighter: {
+    name: 'BRISTOL BEAUFIGHTER', short: 'BEAUFIGHTER', team: TEAM.RAF, role: 'fighterbomber', vs: 45, vmax: 145, gmax: 5, roll: 1.6, yaw: 0.35,
+    power: 220, hp: 190, boost: 1.12,
+    volleys: [{ kind: 'cannon', rate: 10, perVolley: 4, ammo: 150 }, { kind: 'mg', rate: 16, perVolley: 6, ammo: 400 }],
+    converge: 300, bombs: 2, bombKind: 'bomb500', bombDelay: 8, twin: true,
+  },
+  torbeau: {
+    name: 'BEAUFIGHTER TF.X', short: 'TORBEAU', team: TEAM.RAF, role: 'fighterbomber', vs: 45, vmax: 140, gmax: 5, roll: 1.6, yaw: 0.35,
+    power: 220, hp: 190, boost: 1.12, twin: true,
+    volleys: [{ kind: 'cannon', rate: 10, perVolley: 4, ammo: 150 }, { kind: 'mg', rate: 16, perVolley: 6, ammo: 400 }],
+    converge: 300, bombs: 1, bombKind: 'torpedo18',
+  },
+  boston: {
+    name: 'DOUGLAS BOSTON III', short: 'BOSTON', team: TEAM.RAF, role: 'bomber', vs: 43, vmax: 145, gmax: 3.5, roll: 1.1, yaw: 0.28,
+    power: 170, hp: 230, boost: 1.05, twin: true, gunners: true,
+    volleys: [], converge: 350, bombs: 4, bombKind: 'bomb500',
+  },
+  p51: {
+    name: 'P-51D MUSTANG', short: 'MUSTANG', team: TEAM.RAF, role: 'fighter', vs: 44, vmax: 195, gmax: 7.5, roll: 2.7, yaw: 0.45,
+    power: 260, hp: 115, boost: 1.18,
+    volleys: [{ kind: 'hmg', rate: 13, perVolley: 6, ammo: 350 }], converge: 350, bombs: 0,
+  },
+  b17: {
+    name: 'B-17G FLYING FORTRESS', short: 'B-17', team: TEAM.RAF, role: 'bomber', vs: 44, vmax: 125, gmax: 2.8, roll: 0.65, yaw: 0.2,
+    power: 140, hp: 480, boost: 1.05, twin: true, gunners: true,
+    volleys: [], converge: 400, bombs: 6, bombKind: 'bomb500',
   },
   bf109: {
     name: 'BF 109 G-6', short: 'BF 109', team: TEAM.LW, role: 'fighter', vs: 43, vmax: 182, gmax: 7, roll: 2.4, yaw: 0.5,
@@ -55,6 +84,7 @@ export const TYPES = {
     converge: 400, bombs: 4, bombKind: 'bomb500', gunners: true, twin: true,
   },
 };
+TYPES.mosquitorp = { ...TYPES.mosquito, name: 'MOSQUITO FB.VI · RP-3', short: 'MOSQUITO RP', bombs: 8, bombKind: 'rocket25' };
 for (const k in TYPES) {
   const t = TYPES[k];
   t.key = k;

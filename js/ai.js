@@ -82,6 +82,7 @@ export class Pilot {
       case 'pullout': this.doPullout(dt); break;
       case 'rtb': this.doRTB(dt); break;
       case 'strafe': this.doStrafe(dt); break;
+      case 'navigate': this.sim.mission.navigatePilot(this, dt); break;
       default: this.doMission(dt);
     }
     this.safety(dt);
@@ -93,6 +94,9 @@ export class Pilot {
   think() {
     const ac = this.ac, sim = this.sim, T = ac.type;
     if (this.state === 'takeoff') return;
+    if (sim.mission?.thinkPilot) { sim.mission.thinkPilot(this); return; }
+    if (sim.mission && ac.raidInterceptor) { sim.mission.thinkInterceptor(this); return; }
+    if (sim.mission && ac.team === sim.playerTeam && ac !== sim.player) { sim.mission.thinkWingman(this); return; }
     if (this.target && !this.target.alive) { this.target = null; if (this.state === 'attack') this.state = 'mission'; }
     // threats: an enemy behind us pointing at us
     this.threat = null;
@@ -142,8 +146,8 @@ export class Pilot {
       }
       // Mosquito wingmen bomb when their leader takes them over the enemy airfield
       if (this.state === 'mission' && g && g.kind === 'flight' && T.bombs && ac.bombs > 0 && g.leader && g.leader !== ac) {
-        const ef = sim.teams[1 - ac.team].field;
-        if (Math.hypot(ef.x - g.leader.pos.x, ef.z - g.leader.pos.z) < 4500) {
+        const ef = sim.mission?.target || sim.teams[1 - ac.team].field;
+        if ((!sim.mission || sim.mission.releaseTime !== null) && Math.hypot(ef.x - g.leader.pos.x, ef.z - g.leader.pos.z) < 4500) {
           this.gtarget = sim.pickBombTarget(ac.team, null, this);
           if (this.gtarget) this.state = 'bombrun';
         }
@@ -398,6 +402,7 @@ export class Pilot {
 
   // strafing run on a ground target: line up from ~2 km, shallow dive, fire, pull off and extend
   doStrafe(dt) {
+    if (this.sim.mission && this.group?.order === 'suppress') return this.sim.mission.suppressGun(this, dt);
     const ac = this.ac, t = this.gtarget, sim = this.sim;
     if (!t || !t.alive || ac.ammo.every((a) => a <= 0)) { this.state = 'mission'; this.gtarget = null; return; }
     this.strafeT += dt;
@@ -435,14 +440,16 @@ export class Pilot {
   safety(dt) {
     const ac = this.ac, w = this.sim.world;
     const vy = ac.vel.y;
+    const lowStrafe = this.sim.mission && this.state === 'strafe' && this.strafePhase === 'run';
     // terrain ahead (look further when descending fast)
     let minClear = 1e9;
     for (let k = 1; k <= 4; k++) {
-      const t = k * 1.1;
+      const t = k * (lowStrafe ? 0.45 : 1.1);
       const x = ac.pos.x + ac.vel.x * t, z = ac.pos.z + ac.vel.z * t, y = ac.pos.y + vy * t;
       minClear = Math.min(minClear, y - w.groundAt(x, z));
     }
-    const floor = this.state === 'dive' ? 250 : this.state === 'pullout' ? 60 : this.state === 'strafe' ? 30 : (this.ac.type.key === 'mosquito' && this.state === 'bombrun' ? 55 : 90);
+    const floor = this.sim.mission ? (w.heightAt(ac.pos.x, ac.pos.z) <= 0 ? 15 : lowStrafe ? 25 : 35)
+      : this.state === 'dive' ? 250 : this.state === 'pullout' ? 60 : this.state === 'strafe' ? 30 : (this.ac.type.key === 'mosquito' && this.state === 'bombrun' ? 55 : 90);
     const clear = Math.min(minClear, ac.agl ?? 1e9);
     if (clear < floor) {
       const k = clamp((floor - clear) / floor, 0, 1);

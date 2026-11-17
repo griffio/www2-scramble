@@ -4,6 +4,7 @@
 import { V3, Quat, qrot, qrotInv, clamp, lerp, damp, smoothstep, DEG, G, mulberry32 } from './math.js';
 import { World, FIELDS, TEAM, fieldToWorld, worldToField, MAP_HALF } from './world.js';
 import { TYPES, GUNS } from './types.js';
+import { SCENARIOS, OPERATIONS } from './scenarios.js';
 import { Sim, SIM_DT } from './sim.js';
 import { steer, leadPoint, Pilot } from './ai.js';
 import { buildModels, STATIC_CAMO } from './models.js';
@@ -13,7 +14,8 @@ import { Particles, P, explosion, flakBurst, impact, hitSparks } from './particl
 import { HUD } from './hud.js';
 import { Input, PAD } from './input.js';
 import { GameAudio } from './audio.js';
-import { LINES } from './voicelines.js';
+import { LINES, voicePackFor } from './voicelines.js';
+import { VOICE_ASSETS } from './voice-assets.js';
 
 const $ = (s) => document.querySelector(s);
 const rnd = Math.random;
@@ -47,6 +49,8 @@ class Game {
     this.voice = localStorage.getItem('scramble.voice') !== 'off';
     this.selType = localStorage.getItem('scramble.type') || 'spitfire';
     this.selDiff = localStorage.getItem('scramble.diff') || 'normal';
+    this.selScenario = Object.hasOwn(SCENARIOS, localStorage.getItem('scramble.scenario')) ? localStorage.getItem('scramble.scenario') : 'channel';
+    if (!['spitfire', 'mosquito'].includes(this.selType)) this.selType = 'spitfire';
   }
 
   async boot() {
@@ -96,7 +100,7 @@ class Game {
     }
     R.addMesh('propdisc', b.build(), 96);
     for (const k in M.statics) {
-      const dyn = ['bomb500', 'bomb250', 'parachute', 'debris', 'hangar', 'hangarRuin', 'tower', 'fuelTank', 'flakGun', 'lightAA', 'crater', 'wreck'].includes(k);
+      const dyn = ['objective', 'housing', 'ship', 'destroyer', 'submarine', 'rocket25', 'torpedo18', 'factoryHall', 'factoryRuin', 'bomb500', 'bomb250', 'parachute', 'debris', 'hangar', 'hangarRuin', 'tower', 'fuelTank', 'flakGun', 'lightAA', 'crater', 'wreck'].includes(k);
       R.addMesh('s:' + k, M.statics[k], dyn ? 64 : 512, !dyn);
     }
     // permanent static scenery (landmarks, airfield clutter): uploaded once
@@ -200,32 +204,50 @@ class Game {
   hideOverlays() {
     clearTimeout(this.endTimer);
     for (const id of ['#end', '#respawn', '#pause']) $(id).classList.add('hidden');
-    if (window.speechSynthesis) { window.speechSynthesis.cancel(); this.speakQ = 0; }
+    this.audio?.stopVoice?.();
   }
   startAttract() {
     this.hideOverlays();
     this.paused = false;
+    this.selectWorld('channel');
+    this.ps.n = 0;
     this.world.resetTargets();
     this.sim = new Sim(this.world, { difficulty: 'normal', noPlayer: true });
     this.state = 'title';
     this.attractT = 0; this.attractTarget = null; this.spectate = null;
     this.camMode = 'cinematic';
   }
-  startGame() {
+  selectWorld(scenario) {
+    if (this.world.scenario === scenario) return;
+    this.world = new World({ scenario });
+    this.R.initTerrain(this.world);
+    this.batches?.clear(); this.staticMeshes = null;
+    this.registerMeshes();
+    this.streamSig = null;
+    this.hud.world = this.world; this.hud.mapCanvas = this.hud.buildMap(this.world);
+  }
+  startGame({ raidStart = 'runway' } = {}) {
     this.hideOverlays();
     this.paused = false;
+    this.selectWorld(this.selScenario);
     this.world.resetTargets();
     this.ps.n = 0;
-    this.sim = new Sim(this.world, { difficulty: this.selDiff, playerType: this.selType });
+    this.sim = new Sim(this.world, { difficulty: this.selDiff, playerType: this.selType, raidStart });
     this.state = 'play';
     this.score = 0; this.dead = false; this.respawnShown = false;
-    this.spectate = null; this.wingOrder = 'engage';   // per-battle state (the new Sim's flight starts on "engage")
+    this.spectate = null; this.wingOrder = this.sim.mission ? this.sim.playerGroup.order : 'engage';
     this.camMode = 'chase';
+    this.acc = 0; this.chaseInit = false; this.shake = 0;
+    this.cam.fov = 62 * DEG;
+    this.dmgFlash = 0; this.blackout = 0; this.redout = 0; this.hitMarker = 0; this.zoom = 1;
+    this.head = null; this.fb = null; this.bigMap = false; this.navFocus(null);
     const f = this.world.fields[0];
     this.aimYaw = f.hdg; this.aimPitch = 11 * DEG;
+    if (this.sim.mission?.quickStart || this.sim.mission?.spec) this.resetAim();
     this.throttle = 1;
-    this.hud.msgs = [];
-    this.hud.big('SCRAMBLE!', `${TYPES[this.selType].name} - ${f.name}`, 4);
+    this.hud.msgs = []; this.hud.feed = [];
+    const spec = SCENARIOS[this.selScenario];
+    this.hud.big(this.sim.mission ? spec.title : 'SCRAMBLE!', `${TYPES[this.sim.playerType].name} · ${this.sim.player?.state === 'air' ? 'GEAR UP · YOU HAVE CONTROL' : f.name}`, 4);
     this.audio.ui('start');
     $('#title').classList.add('hidden'); $('#end').classList.add('hidden'); $('#respawn').classList.add('hidden');
     if (this.mouseAim) this.input.lock();
@@ -234,33 +256,92 @@ class Game {
     this.state = 'end';
     const won = winner === this.sim.playerTeam;
     const st = this.sim.playerStats;
+    $('#again').textContent = this.sim.mission ? 'FULL SORTIE' : 'FLY AGAIN';
     $('#end h1').textContent = won ? 'VICTORY' : 'DEFEAT';
     $('#end .sub').textContent = won ? 'The Luftwaffe airfield is in ruins and their squadrons are destroyed.' : 'Hawkinge has been knocked out. The Luftwaffe rules the Channel skies today.';
+    if (this.sim.mission) {
+      $('#end h1').textContent = won ? 'RAID COMPLETE' : this.sim.player?.alive ? 'TARGET MISSED' : 'AIRCRAFT LOST';
+      const halls = this.sim.mission.target.halls.filter((h) => !h.alive).length;
+      $('#end .sub').textContent = this.sim.mission.spec ? this.sim.mission.reason : `${this.sim.mission.reason} ${halls} factory halls destroyed.`;
+    }
     $('#end .stats').innerHTML = `
       <div><b>${st.kills}</b>AIR KILLS</div><div><b>${st.groundKills}</b>GROUND TARGETS</div>
       <div><b>${st.sorties}</b>SORTIES</div><div><b>${this.score}</b>SCORE</div>
       <div><b>${this.sim.teams[1].losses}</b>LUFTWAFFE LOSSES</div><div><b>${this.sim.teams[0].losses}</b>RAF LOSSES</div>
       <div><b>${Math.floor(this.sim.time / 60)}:${String(Math.floor(this.sim.time % 60)).padStart(2, '0')}</b>BATTLE TIME</div>`;
+    $('#continue-home').classList.toggle('hidden', !this.sim.mission?.canContinueHome);
+    $('#end .debrief-note').classList.toggle('hidden', !this.sim.mission);
+    if (this.sim.mission) {
+      const mission = this.sim.mission, d = mission.debrief || mission.makeDebrief(won);
+      this.score = d.totalScore;
+      const key = `scramble.raidBest.${mission.spec ? mission.key + '.' : ''}${this.sim.difficulty}.${mission.quickStart ? 'coast' : 'full'}`;
+      const stored = Number(localStorage.getItem(key));
+      const previous = Number.isFinite(stored) && stored > 0 ? stored : 0;
+      const best = Math.max(previous, won ? d.totalScore : 0);
+      if (best > previous) localStorage.setItem(key, String(best));
+      if (mission.returnHome && !this.sim.player.alive) $('#end h1').textContent = 'LOST ON RETURN';
+      const rows = d.rows ? [['MISSION GRADE', `${d.grade} · ${d.rating}/100`], ['MISSION SCORE', d.totalScore], ...d.rows, ['PERSONAL BEST', best]] : [['MISSION GRADE', `${d.grade} · ${d.rating}/100`], ['RAID SCORE', d.totalScore],
+        ['BOMB ACCURACY', `${d.accuracy}% · ${d.hits}/${d.drops}`], ['FACTORY DAMAGE', `${d.damage}% · ${d.halls} HALLS`],
+        ['WINGMEN SURVIVING', `${d.wingmen}/3`], ['AA GUNS DESTROYED', d.guns], ['AIR KILLS', d.kills],
+        ['AIRCRAFT REMAINING', `${d.integrity}%`], ['LOW-LEVEL FLYING', `${d.lowLevel}%`],
+        ['LANDING BONUS', d.landingBonus], ['PERSONAL BEST', best]];
+      $('#end .stats').innerHTML = rows.map(([label, value]) => `<div><b>${value}</b>${label}</div>`).join('');
+      const category = `${{ easy: 'Rookie', normal: 'Veteran', ace: 'Ace' }[this.sim.difficulty]} · ${mission.quickStart ? (mission.spec ? 'quick start' : 'coast practice') : 'full sortie'}`;
+      $('#end .debrief-note').textContent = `${best > previous ? 'NEW PERSONAL BEST. ' : ''}Records: ${category}. Accuracy, factory damage, surviving wingmen, low flying and escape earn points.${d.damagedLanding ? ' Damaged-aircraft landing: +500 bonus.' : ''}${mission.canContinueHome ? ' Continue with the same aircraft and damage to earn a landing bonus.' : ''}`;
+      if (mission.spec) $('#end .debrief-note').textContent = `${best > previous ? 'NEW PERSONAL BEST. ' : ''}${mission.title} · ${category}. Mission objectives, survival and aircraft recovered earn most points. Quick-start and full-sortie records are separate.`;
+    }
     $('#end').classList.remove('hidden'); $('#respawn').classList.add('hidden');
-    this.audio.ui(won ? 'victory' : 'defeat');
+    if (this.sim.mission) { this.audio.stopVoice?.(); this.say(this.sim.mission.resultVoice); }
+    this.audio.ui(won && !(this.sim.mission?.returnHome && !this.sim.player.alive) ? 'victory' : 'defeat');
     this.input.unlock();
+  }
+
+  continueHome() {
+    if (this.state !== 'end' || !this.sim.mission?.continueHome()) return;
+    this.hideOverlays(); this.state = 'play'; this.paused = false;
+    this.acc = 0; this.camMode = 'chase'; this.chaseInit = false; this.wingOrder = 'cover';
+    this.navFocus(null); this.resetAim();
+    this.hud.big('RETURN TO RAF HAWKINGE', 'OPTIONAL LANDING BONUS · DAMAGE CARRIES OVER', 4);
+    if (this.mouseAim) this.input.lock();
   }
 
   setupUI() {
     const sel = () => {
-      document.querySelectorAll('.plane').forEach((e) => e.classList.toggle('on', e.dataset.type === this.selType));
+      const raid = this.selScenario === 'factory', operation = OPERATIONS.includes(this.selScenario), spec = SCENARIOS[this.selScenario];
+      document.querySelectorAll('[data-scenario]').forEach((e) => { e.classList.toggle('on', e.dataset.scenario === this.selScenario); e.setAttribute('aria-pressed', e.dataset.scenario === this.selScenario); });
+      document.querySelectorAll('.plane').forEach((e) => {
+        const beau = e.dataset.type === 'beaufighter';
+        e.classList.toggle('hidden', operation || beau !== raid);
+        e.classList.toggle('on', raid ? beau : e.dataset.type === this.selType);
+      });
+      $('#title .planes').classList.toggle('raid-planes', raid);
+      $('#title .planes').classList.toggle('hidden', operation);
+      $('#operation-card').classList.toggle('hidden', !operation);
+      if (operation) { $('#operation-card .pname').textContent = TYPES[spec.type].name; $('#operation-card .operation-orders').textContent = spec.orderHelp; }
+      $('#title .diff').classList.remove('hidden');
+      $('#battle-controls').classList.remove('hidden');
+      $('#raid-controls').classList.toggle('hidden', !raid);
+      $('#wing-controls').innerHTML = `<b>1/2/3</b> wingmen: ${operation ? spec.orderHelp : raid ? 'suppress AA / cover me / bomb the factory' : 'attack my target / form up / engage'} &middot; <b>M</b> switch to mouse aim &middot; <b>G</b> gear`;
+      document.querySelectorAll('[data-raid-start]').forEach((e) => { e.classList.toggle('hidden', !raid && !operation); e.textContent = `${e.id === 'practice-coast' ? 'PRACTISE' : 'RETRY'} FROM ${spec.quick || 'DUTCH COAST'}`; });
+      $('#title .lede').textContent = spec.brief;
+      $('#title .kicker').textContent = spec.location;
+      $('#go').textContent = raid || operation ? 'START SORTIE' : 'SCRAMBLE!';
       document.querySelectorAll('.diff button').forEach((e) => e.classList.toggle('on', e.dataset.diff === this.selDiff));
     };
-    document.querySelectorAll('.plane').forEach((e) => e.addEventListener('click', () => { this.selType = e.dataset.type; localStorage.setItem('scramble.type', this.selType); sel(); this.audio.ui('select'); }));
+    document.querySelectorAll('[data-scenario]').forEach((e) => e.addEventListener('click', () => { this.selScenario = e.dataset.scenario; localStorage.setItem('scramble.scenario', this.selScenario); sel(); this.audio.ui('select'); }));
+    document.querySelectorAll('.plane').forEach((e) => e.addEventListener('click', () => { if (e.dataset.type !== 'beaufighter') { this.selType = e.dataset.type; localStorage.setItem('scramble.type', this.selType); } sel(); this.audio.ui('select'); }));
     document.querySelectorAll('.diff button').forEach((e) => e.addEventListener('click', () => { this.selDiff = e.dataset.diff; localStorage.setItem('scramble.diff', this.selDiff); sel(); this.audio.ui('select'); }));
     sel();
-    const go = async () => {
-      if (this.starting || (this.state !== 'title' && this.state !== 'end')) return;
+    const go = async (raidStart = 'runway') => {
+      if (this.starting || !(['title', 'end'].includes(this.state) || (this.state === 'play' && this.paused && raidStart === 'coast'))) return;
+      if (raidStart === 'coast' && this.selScenario === 'channel') return;
       this.starting = true;
-      try { await this.audio.init(); this.startGame(); } finally { this.starting = false; }
+      try { await this.audio.init(); this.startGame({ raidStart }); } finally { this.starting = false; }
     };
-    $('#go').addEventListener('click', go);
-    $('#again').addEventListener('click', go);
+    $('#go').addEventListener('click', () => go());
+    $('#again').addEventListener('click', () => go());
+    $('#continue-home').addEventListener('click', () => this.continueHome());
+    document.querySelectorAll('[data-raid-start]').forEach((e) => e.addEventListener('click', () => go('coast')));
     $('#menu').addEventListener('click', () => { $('#end').classList.add('hidden'); $('#title').classList.remove('hidden'); this.startAttract(); });
     $('#resume').addEventListener('click', () => this.setPaused(false));
     $('#quit').addEventListener('click', () => { this.setPaused(false); $('#title').classList.remove('hidden'); this.startAttract(); });
@@ -270,7 +351,7 @@ class Game {
       if (!document.pointerLockElement && this.state === 'play' && !this.dead && this.mouseAim && !this.paused) this.setPaused(true);
     });
     this.canvas.addEventListener('click', () => { if (this.state === 'play' && !this.paused && this.mouseAim) this.input.lock(); });
-    window.addEventListener('keydown', (e) => { if (e.code === 'Enter' && this.state === 'title') go(); });
+    window.addEventListener('keydown', (e) => { if (e.code === 'Enter' && ['title', 'end'].includes(this.state)) go(this.state === 'end' && this.sim.mission ? 'coast' : 'runway'); });
     // a controller press doesn't count as a user gesture: started from the pad, the sound stays
     // suspended until the first click or key press
     const wake = () => { if (this.audio.ctx && this.audio.ctx.state === 'suspended') this.audio.init(); };
@@ -313,7 +394,7 @@ class Game {
       if (k === 'KeyP' || k === 'Pad' + PAD.OPTIONS) this.setPaused(!this.paused);
       if (k === 'Escape' && !this.paused) this.setPaused(true);
       if (this.paused) continue;
-      if (k === 'KeyC' || k === 'Pad' + PAD.CIRCLE) this.camMode = { chase: 'cockpit', cockpit: 'cinematic', cinematic: 'chase' }[this.camMode] || 'chase';
+      if (k === 'KeyC' || k === 'Pad' + PAD.CIRCLE) this.camMode = this.sim.mission ? { raid: 'chase', chase: 'cockpit', cockpit: 'raid' }[this.camMode] || 'raid' : { chase: 'cockpit', cockpit: 'cinematic', cinematic: 'chase' }[this.camMode] || 'chase';
       if (k === 'KeyM') { this.mouseAim = !this.mouseAim; localStorage.setItem('scramble.mouseAim', this.mouseAim ? 'on' : 'off'); this.hud.radio(this.mouseAim ? 'CONTROLS: MOUSE AIM' : 'CONTROLS: ARROW KEYS / JOYSTICK', 'info'); if (this.mouseAim) { this.resetAim(); this.input.lock(); } else this.input.unlock(); }
       if (k === 'KeyT' || k === 'Pad' + PAD.SQUARE) this.cycleTarget();
       if ((k === 'KeyG' || k === 'Pad' + PAD.SHARE) && this.sim.player) {   // gear + flaps, in the air only
@@ -322,17 +403,21 @@ class Game {
         else { p.gearUp = !p.gearUp; p.flapDown = !p.gearUp; this.hud.radio(`GEAR AND FLAPS ${p.gearUp ? 'UP' : 'DOWN'}`, 'info'); }
       }
       if (k === 'Tab' || k === 'Pad' + PAD.TOUCHPAD) this.bigMap = !this.bigMap;
-      if (k === 'KeyR') { this.voice = !this.voice; localStorage.setItem('scramble.voice', this.voice ? 'on' : 'off'); this.hud.radio(`RADIO VOICE ${this.voice ? 'ON' : 'OFF'}`, 'info'); }
+      if (k === 'KeyR') { this.voice = !this.voice; localStorage.setItem('scramble.voice', this.voice ? 'on' : 'off'); if (!this.voice) this.audio.stopVoice(); this.hud.radio(`RADIO VOICE ${this.voice ? 'ON' : 'OFF'}`, 'info'); }
       if (k === 'KeyO') { this.audio.setMuted(!this.audio.muted); }
-      if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') this.orderWingmen({ Digit1: 'attack', Digit2: 'cover', Digit3: 'engage' }[k]);
+      if (k === 'Digit1' || k === 'Digit2' || k === 'Digit3') this.orderWingmen((this.sim.mission ? this.sim.mission.orderKeys[Number(k.at(-1)) - 1] : { Digit1: 'attack', Digit2: 'cover', Digit3: 'engage' }[k]));
       // D-pad left / right: step through the wingman orders (every order is one press away)
       if (k === 'Pad' + PAD.LEFT || k === 'Pad' + PAD.RIGHT) {
-        const O = ['attack', 'cover', 'engage'], i = O.indexOf(this.wingOrder);
+        const O = this.sim.mission ? this.sim.mission.orderKeys : ['attack', 'cover', 'engage'], i = O.indexOf(this.wingOrder);
         this.orderWingmen(O[(i + (k === 'Pad' + PAD.RIGHT ? 1 : 2)) % 3]);
       }
     }
   }
   orderWingmen(o) {
+    if (this.sim.mission) {
+      if (this.sim.mission.orderWingmen(o)) this.wingOrder = o;
+      return;
+    }
     this.wingOrder = o;
     if (this.sim.playerGroup) this.sim.playerGroup.order = o;
     const txt = { attack: 'RED SECTION, ATTACK MY TARGET!', cover: 'RED SECTION, FORM UP ON ME!', engage: 'RED SECTION, ENGAGE AT WILL!' }[o];
@@ -361,10 +446,10 @@ class Game {
   navItems() {
     const vis = (id) => !$(id).classList.contains('hidden');
     let sel, def;
-    if (vis('#pause')) { sel = '#pause button'; def = '#resume'; }
-    else if (vis('#end')) { sel = '#end button'; def = '#again'; }
+    if (vis('#pause')) { sel = '#pause button:not(.hidden)'; def = '#resume'; }
+    else if (vis('#end')) { sel = '#end button:not(.hidden)'; def = this.sim.mission ? '#retry-coast' : '#again'; }
     else if (vis('#respawn')) { sel = '#respawn .plane2:not(.dis)'; def = `#respawn .plane2[data-type=${this.selType}]:not(.dis)`; }
-    else if (this.state === 'title' && vis('#title')) { sel = '#title .plane, #title .diff button, #go'; def = '#go'; }
+    else if (this.state === 'title' && vis('#title')) { sel = '#title [data-scenario], #title .plane:not(.hidden), #title .diff:not(.hidden) button, #title [data-raid-start]:not(.hidden), #go'; def = '#go'; }
     else return null;
     const items = [...document.querySelectorAll(sel)];
     return { key: sel, items, def: $(def) || items[0] };
@@ -399,7 +484,7 @@ class Game {
     }
     if (k === 'Pad' + PAD.CROSS) { (cur || def)?.click(); return true; }
     if (k === 'Pad' + PAD.CIRCLE && !$('#pause').classList.contains('hidden')) { this.setPaused(false); return true; }
-    if (k === 'Pad' + PAD.OPTIONS && this.state !== 'play') { (this.state === 'title' ? $('#go') : $('#again')).click(); return true; }
+    if (k === 'Pad' + PAD.OPTIONS && this.state !== 'play') { def.click(); return true; }
     return k.startsWith('PadNav');   // other buttons fall through (Options still unpauses)
   }
   resetAim() { const p = this.sim.player; if (!p) return; this.aimYaw = p.compass; this.aimPitch = p.pitchAngle; }
@@ -526,6 +611,7 @@ class Game {
 
   gameFlow(dt) {
     const sim = this.sim;
+    if (sim.mission) { if (sim.result) this.endGame(sim.result.winner); return; }
     if (sim.result && this.state === 'play') { this.endTimer = setTimeout(() => this.endGame(sim.result.winner), 2500); this.state = 'ending'; this.hud.big(sim.result.winner === sim.playerTeam ? 'VICTORY!' : 'DEFEAT', '', 3); this.say(sim.result.winner === sim.playerTeam ? 'victory' : 'defeat'); return; }
     const p = sim.player, tm = sim.teams[sim.playerTeam];
     const queued = !!tm && tm.launchQ.some((q) => q.player);
@@ -588,9 +674,14 @@ class Game {
         case 'debris':
           for (let k = 0; k < 6; k++) ps.emit(P.debris, e.x, e.y, e.z, e.vx * 0.6 + (rnd() - 0.5) * 50, e.vy * 0.6 + rnd() * 30, e.vz * 0.6 + (rnd() - 0.5) * 50, 1 + rnd(), 2);
           break;
-        case 'flak': flakBurst(ps, e.x, e.y, e.z); A.flak(e); if (play) { const d = Math.hypot(e.x - this.cam.pos.x, e.y - this.cam.pos.y, e.z - this.cam.pos.z); this.rum.s = Math.max(this.rum.s, clamp(60 / (d + 20), 0, 0.7)); } break;
+        case 'flak': flakBurst(ps, e.x, e.y, e.z); A.flak(e); if (play) { const d = Math.hypot(e.x - this.cam.pos.x, e.y - this.cam.pos.y, e.z - this.cam.pos.z); this.rum.s = Math.max(this.rum.s, clamp(60 / (d + 20), 0, 0.7)); this.shake = Math.max(this.shake, clamp(30 / (d + 25), 0, 0.45)); } break;
         case 'flakfire': if (near(e.x, e.y, e.z, 5000)) { ps.emit(P.flash, e.x, e.y + 2, e.z, 0, 0, 0, 0.6); ps.emit(P.smoke, e.x, e.y + 3, e.z, 0, 4, 0, 1); } break;
-        case 'bombdrop': if (e.ac === p) { A.bombRelease(); this.rum.s = Math.max(this.rum.s, 0.5); } break;
+        case 'bombdrop':
+          if (e.ac.type.bombKind === 'rocket25') {
+            A.rocketLaunch(e.ac.pos, e.ac === p);
+            if (e.ac === p) this.rum.s = Math.max(this.rum.s, .3);
+          } else if (e.ac === p) { A.bombRelease(); this.rum.s = Math.max(this.rum.s, .5); }
+          break;
         case 'kill': {
           if (!play) break;
           if (e.killer && e.killer === p) { A.ui('kill'); }
@@ -612,28 +703,15 @@ class Game {
     sim.events.length = 0;
   }
 
-  // radio speech: the recorded R/T line when there is one (falls back to the browser's speech
-  // synthesis if the clip can't load), otherwise just the squelch for control / alert messages
+  // Only prerecorded performances are spoken. Missing lines retain captions and radio squelch.
   say(key, text = '', cls = 'control') {
     const A = this.audio, important = cls === 'control' || cls === 'alert';
-    if (!this.voice) { if (important) A.radio(); return; }
-    const urgent = !!LINES[key] && LINES[key][0] !== 'control' && LINES[key][0] !== 'crew';
-    if (key) A.voice(key, () => { if (important && text) this.speak(text); }, urgent);
-    else if (important) { A.radio(); if (text) this.speak(text); }
-  }
-
-  speak(text) {
-    if (!window.speechSynthesis) return;
-    const ss = window.speechSynthesis;
-    if (ss.pending || ss.speaking) { if (this.speakQ > 1) return; }
-    const clean = text.replace(/^[A-Z ]+: /, '').toLowerCase().replace(/\bjg\b/g, 'J G').replace(/!/g, '.');
-    const u = new SpeechSynthesisUtterance(clean);
-    if (!this.voices || !this.voices.length) this.voices = ss.getVoices().filter((v) => /en-GB/i.test(v.lang));
-    if (this.voices.length) u.voice = this.voices[0];
-    u.rate = 1.12; u.pitch = 0.9; u.volume = 0.8;
-    this.speakQ = (this.speakQ || 0) + 1;
-    u.onend = u.onerror = () => { this.speakQ = Math.max(0, (this.speakQ || 0) - 1); };   // cancelled / interrupted ones end with an error
-    ss.speak(u);
+    if (!this.voice || !key || !LINES[key]) { if (important) A.radio(); return; }
+    const pack = voicePackFor(this.sim?.world.scenario || this.selScenario);
+    const asset = VOICE_ASSETS[`${pack}/${key}`];
+    if (!asset) { if (important) A.radio(); return; }
+    const urgent = LINES[key][0] !== 'control' && LINES[key][0] !== 'crew';
+    A.voice(asset, () => { if (important) A.radio(); }, urgent);
   }
 
   // continuous effects: smoke trails, fire, exhaust, wingtip vapour, parachutes
@@ -678,6 +756,12 @@ class Game {
     if (this.wreckT > 0.12) {
       this.wreckT = 0;
       const cx = this.cam.pos.x, cz = this.cam.pos.z, farSq = 9000 * 9000;
+      for (const t of ['convoy','norway'].includes(this.sim.mission?.key) ? this.sim.mission.target.halls : []) if(t.alive) {
+        const s = Math.sin(t.yaw), c = Math.cos(t.yaw);
+        ps.emit(P.vapour, t.x + s*t.length*.45, .3, t.z + c*t.length*.45, s*2, 0, c*2, 3, 2);
+      }
+      for (const b of this.sim.bombs) if(b.rocket && b.t < .65) ps.emit(P.smoke,b.x,b.y,b.z,-b.vx*.05,-b.vy*.05,-b.vz*.05,.4);
+      for (const b of this.sim.bombs) if(b.running) ps.emit(P.vapour,b.x,.25,b.z,-b.vx*.03,0,-b.vz*.03,.35,1.2);
       for (const w of this.sim.wrecks) {
         w.t += 0.12;
         if (w.t > 90 || (w.x - cx) * (w.x - cx) + (w.z - cz) * (w.z - cz) > farSq) continue;
@@ -685,11 +769,11 @@ class Game {
         if (w.t < 25 && rnd() < 0.6) ps.emit(P.fire, w.x + (rnd() - 0.5) * 5, w.y + 1.5, w.z + (rnd() - 0.5) * 5, 0, 3, 0, 1.8);
       }
       for (const t of this.world.targets) {
-        if (t.alive || (t.kind !== 'hangar' && t.kind !== 'fuel' && t.kind !== 'tower')) continue;
+        if (t.alive || !['factory', 'hangar', 'fuel', 'tower', 'ship', 'objective', 'housing'].includes(t.kind)) continue;
         t.burnT = (t.burnT || 0) + 0.12;
         if (t.burnT > 150 || (t.x - cx) * (t.x - cx) + (t.z - cz) * (t.z - cz) > farSq * 2) continue;
-        const r = t.kind === 'hangar' ? 20 : 5;
-        ps.emit(P.blackSmoke, t.x + (rnd() - 0.5) * r, t.y + 6, t.z + (rnd() - 0.5) * r, 0, 4, 0, t.kind === 'hangar' ? 2.2 : 1.3, 2);
+        const r = t.kind === 'factory' ? 55 : t.kind === 'hangar' ? 20 : 5;
+        ps.emit(P.blackSmoke, t.x + (rnd() - 0.5) * r, t.y + 6, t.z + (rnd() - 0.5) * r, 0, 4, 0, t.kind === 'factory' ? 4 : t.kind === 'hangar' ? 2.2 : 1.3, 2);
         if (t.burnT < 60) ps.emit(P.fire, t.x + (rnd() - 0.5) * r, t.y + 3, t.z + (rnd() - 0.5) * r, 0, 4, 0, 3);
       }
     }
@@ -718,6 +802,11 @@ class Game {
       return;
     }
     if (this.state === 'title' || this.state === 'end') return this.attractCamera(dt);
+    if (sim.mission && this.camMode === 'raid' && p?.alive) {
+      const shot = sim.mission.camera(p, cam, sim.time);
+      this.inCockpit = shot.cockpit; this.eye = shot.eye;
+      return;
+    }
     if (!follow) {
       // spectate: the last aircraft of our flight / any friendly
       if (!this.spectate || !this.spectate.alive) this.spectate = sim.aircraft.find((a) => a.team === sim.playerTeam && a.alive && a.group === sim.playerGroup) || sim.aircraft.find((a) => a.team === sim.playerTeam && a.alive) || sim.aircraft[0];
@@ -916,7 +1005,7 @@ class Game {
       if (a !== p && !this.sphereVisible(rx, ry, rz, (a.type.geom ? a.type.geom.span : 10) * 0.6 * scale)) continue;
       const gy = world.groundAt(a.rp.x, a.rp.z);
       const shadow = d < 3000 ? clamp(1 - (a.rp.y - gy) / 250, 0, 1) : 0;
-      const cockpit = a === p && this.inCockpit && this.camMode === 'cockpit' ? 1 : 0;
+      const cockpit = a === p && this.inCockpit ? 1 : 0;
       const key = a.type.key, q = a.rq;
       const soot = a.smoke * 0.8 + (a.state === 'down' ? 0.3 : 0), flash = a.hitFlash > 0 ? 0.6 : 0, seed = (a.id % 7) * 0.13;
       const body = acBatch(key, 'body');
@@ -959,11 +1048,14 @@ class Game {
     // ---- airfield structures, guns, craters, wrecks, bombs, parachutes
     const M = (k) => this.batch(R.meshes['s:' + k]);
     const sx = (b, x, y, z, s, q) => this.put(b, x - cx, y - cy, z - cz, s, q.x, q.y, q.z, q.w);
-    const statics = this.dynStatics || (this.dynStatics = ['hangar', 'hangarRuin', 'tower', 'fuelTank', 'flakGun', 'lightAA', 'crater', 'wreck', 'bomb500', 'bomb250', 'parachute']);
+    const statics = this.dynStatics || (this.dynStatics = ['objective', 'housing', 'ship', 'destroyer', 'submarine', 'rocket25', 'torpedo18', 'factoryHall', 'factoryRuin', 'hangar', 'hangarRuin', 'tower', 'fuelTank', 'flakGun', 'lightAA', 'crater', 'wreck', 'bomb500', 'bomb250', 'parachute']);
     for (const t of world.targets) {
       if (t.kind === 'runway') continue;
       _q.setAxisAngle(0, 1, 0, t.yaw);
-      if (t.kind === 'hangar') sx(M(t.alive ? 'hangar' : 'hangarRuin'), t.x, t.y, t.z, 1, _q);
+      if (t.kind === 'ship') { sx(M(t.destroyer ? 'destroyer' : t.submarine ? 'submarine' : 'ship'), t.x, -t.sink, t.z, t.destroyer ? 1 : t.submarine ? .8 : t.escort ? .65 : 1, _q); }
+      else if (t.kind === 'objective' || t.kind === 'housing') sx(M(t.alive ? t.kind : 'hangarRuin'), t.x, t.y, t.z, t.kind === 'housing' ? 1 : this.sim.mission?.key === 'precision' ? 1 : 1.5, _q);
+      else if (t.kind === 'factory') sx(M(t.alive ? 'factoryHall' : 'factoryRuin'), t.x, t.y, t.z, 1, _q);
+      else if (t.kind === 'hangar') sx(M(t.alive ? 'hangar' : 'hangarRuin'), t.x, t.y, t.z, 1, _q);
       else if (t.kind === 'tower') { if (t.alive) sx(M('tower'), t.x, t.y, t.z, 1, _q); else sx(M('hangarRuin'), t.x, t.y, t.z, 0.22, _q); }
       else if (t.kind === 'fuel') { if (t.alive) sx(M('fuelTank'), t.x, t.y, t.z, 1, _q); else sx(M('crater'), t.x, t.y, t.z, 0.8, _q); }
       else if (t.kind === 'flak' || t.kind === 'lightAA') {
@@ -976,17 +1068,18 @@ class Game {
     }
     for (const c of sim.craters) { _q.setAxisAngle(0, 1, 0, (c.x * 7.1) % 6.28); sx(M('crater'), c.x, c.y, c.z, c.r, _q); }
     for (const w of sim.wrecks) { _q.setAxisAngle(0, 1, 0, w.yaw); sx(M('wreck'), w.x, w.y, w.z, 1, _q); }
-    for (const b of sim.bombs) { _q.lookDir(b.vx, b.vy, b.vz); sx(M(b.kind === 'bomb250' ? 'bomb250' : 'bomb500'), b.x, b.y, b.z, 1, _q); }
+    for (const b of sim.bombs) { _q.lookDir(b.vx, b.vy, b.vz); sx(M(b.rocket ? 'rocket25' : b.kind === 'bomb250' ? 'bomb250' : b.kind === 'torpedo18' ? 'torpedo18' : 'bomb500'), b.x, b.y, b.z, 1, _q); }
     for (const c of sim.chutes) { _q.setAxisAngle(0, 1, 0, c.t * 0.3); sx(M('parachute'), c.x, c.y, c.z, clamp(c.t / 1.5, 0.2, 1), _q); }
     // bombs still on the racks
     for (const a of sim.aircraft) {
       const g = a.type.geom;
-      if (!g || !a.bombs || a.pos.distSq(cam.pos) > 2500 * 2500) continue;
-      for (let k = a.type.bombs - a.bombs; k < a.type.bombs; k++) {
-        const hp = g.hardpoints[k % g.hardpoints.length];
+      if (!g || g.internalBombs || !a.bombs || a.pos.distSq(cam.pos) > 2500 * 2500) continue;
+      const load = a.type.bombs;
+      for (let k = load - a.bombs; k < load; k++) {
+        const hp = g.hardpoints[((k % g.hardpoints.length) + g.hardpoints.length) % g.hardpoints.length];
         if (!hp) continue;
         qrot(a.rq, hp.x, hp.y, hp.z, _v);
-        this.put(M(hp.kind === 'bomb250' ? 'bomb250' : 'bomb500'), a.rp.x + _v.x - cx, a.rp.y + _v.y - cy, a.rp.z + _v.z - cz, 1, a.rq.x, a.rq.y, a.rq.z, a.rq.w);
+        this.put(M(hp.kind === 'rocket25' ? 'rocket25' : hp.kind === 'bomb250' ? 'bomb250' : hp.kind === 'torpedo18' ? 'torpedo18' : 'bomb500'), a.rp.x + _v.x - cx, a.rp.y + _v.y - cy, a.rp.z + _v.z - cz, 1, a.rq.x, a.rq.y, a.rq.z, a.rq.w);
       }
     }
     for (const k of statics) this.drawBatch(M(k), { camo: STATIC_CAMO });
@@ -1098,7 +1191,7 @@ class Game {
     S.player = this.state === 'play' || this.state === 'ending' ? p : null;
     // rearm prompt: low on ammo or bombs, or damaged -> point the player at the home field
     S.home = null;
-    if (S.player && p.alive) {
+    if (S.player && p.alive && !sim.mission) {
       const T = p.type, f = sim.teams[sim.playerTeam].field;
       const low = p.ammo[0] < T.volleys[0].ammo * 0.25 || (T.bombs && !p.bombs) || p.hp < T.hp * 0.6 || p.engineDmg > 0.3;
       const onHome = this.world.inField(p.pos.x, p.pos.z) === f;
@@ -1144,7 +1237,7 @@ class Game {
       S.target = t;
       if (t && t.alive) { leadPoint(p, t, GUNS[p.type.volleys[0].kind].v, S.lead); S.targetDist = p.pos.dist(t.pos); } else S.target = null;
       // bomb impact predictor
-      if (p.bombs > 0 && p.state === 'air') {
+      if (p.bombs > 0 && p.state === 'air' && p.type.bombKind !== 'torpedo18' && p.type.bombKind !== 'rocket25') {
         let x = p.pos.x, y = p.pos.y, z = p.pos.z, vy = p.vel.y - 1;
         const vx = p.vel.x, vz = p.vel.z;
         for (let i = 0; i < 400; i++) { const dt2 = 0.05; vy -= G * dt2; x += vx * dt2; y += vy * dt2; z += vz * dt2; if (y < this.world.groundAt(x, z)) break; }
@@ -1155,13 +1248,15 @@ class Game {
       S.outOfBounds = Math.abs(p.pos.x) > MAP_HALF || Math.abs(p.pos.z) > MAP_HALF;
     }
     S.groundTargets = [];
-    if (p && p.alive && p.type.bombs) for (const t of this.world.targets) if (t.team !== p.team && t.alive && (t.kind === 'hangar' || t.kind === 'runway')) S.groundTargets.push(t);
+    if (p && p.alive && p.type.bombs) for (const t of this.world.targets) if (t.team !== p.team && t.alive && (sim.mission ? t.kind === 'factory' || t.raidGun || (sim.mission.key === 'norway' && t.kind === 'ship') : t.kind === 'hangar' || t.kind === 'runway')) S.groundTargets.push(t);
     S.status = [sim.teamStatus(0), sim.teamStatus(1)];
+    if (sim.mission?.groundTargets) S.groundTargets = sim.mission.groundTargets.filter(t => t.alive);
     S.raid = sim.raidWarning; S.time = sim.time; S.score = this.score; S.stats = sim.playerStats;
     S.wingOrder = this.wingOrder; S.bigMap = this.bigMap;
     this.hitMarker = Math.max(0, (this.hitMarker || 0) - dt); S.hitMarker = this.hitMarker;
     S.perf = this.showPerf ? { FPS: this.perf.fps.toFixed(0), 'SIM MS': this.perf.sim.toFixed(2), 'RENDER CPU MS': this.perf.render.toFixed(2), 'DRAW CALLS': this.R.drawCalls, GPU: this.R.gpu.replace(/^ANGLE \(|\)$/g, '').slice(0, 26), TRIANGLES: (this.R.tris / 1000).toFixed(0) + 'k', RES: `${this.R.W}x${this.R.H} (${Math.round(this.R.resScale * 100)}%)`, AIRCRAFT: sim.aircraft.length, BULLETS: sim.bullets.n, PARTICLES: this.ps.n } : null;
-    this.hud.draw(S, dt);
+    S.mission = sim.mission; S.camMode = this.camMode;
+    this.hud.draw(S, this.paused ? 0 : dt);
   }
 
   updateAudio(dt) {
@@ -1184,7 +1279,7 @@ class Game {
       list.push(e);
     }
     A.setEngines(list);
-    A.setBombs(this.paused ? [] : sim.bombs);
+    A.setBombs(this.paused ? [] : sim.bombs.filter((b) => !b.landed && !b.rocket));
     A.siren(playing && !!sim.sirenOn);
     // enemy rounds passing within a few metres of the listener this frame: whiz-bys
     if (playing && p && p.alive) {

@@ -1,6 +1,6 @@
 // 2D overlay: gunsight, target markers + lead indicator, instruments, minimap, radio log.
 import { clamp, V3 } from './math.js';
-import { TYPES } from './types.js';
+import { TYPES, BOMBS } from './types.js';
 import { HM_N, HM_CELL, HM_X0, MAP_HALF } from './world.js';
 
 const FONT = '"Gill Sans", "Gill Sans MT", "Trebuchet MS", Calibri, sans-serif';
@@ -68,16 +68,51 @@ export class HUD {
       this.markers(S);
       this.homeField(S);
       this.approach(S);
-      this.statusBar(S);
+      if (S.mission) this.raidHud(S); else this.statusBar(S);
       this.minimap(S);
+      this.radioLog(); this.centerText();
     }
-    if (!S.hidden) { this.radioLog(); this.centerText(); }
     if (S.needClick) {
       g.textAlign = 'center'; g.font = `700 18px ${FONT}`;
       g.fillStyle = 'rgba(0,0,0,0.5)'; roundRect(g, W / 2 - 190, H * 0.62 - 22, 380, 34, 6); g.fill();
       g.fillStyle = AMBER; g.fillText('CLICK TO TAKE CONTROL (MOUSE AIM)', W / 2, H * 0.62);
     }
     if (S.perf) this.perf(S.perf);
+  }
+
+  raidHud(S) {
+    const g = this.g, W = this.W, m = S.mission, p = S.player;
+    if (!p) return;
+    const stages = { takeoff: 'TAKE OFF · PULL BACK ABOVE 100 MPH · G RAISES GEAR', coast: 'ENGLISH COAST', channel: 'CHANNEL CROSSING',
+      country: 'DUTCH COUNTRYSIDE', approach: 'BOMB THE WIRELESS & VALVE WORKS', release: 'BOMBS AWAY · 8 SEC DELAY', egress: 'ESCAPE THE FACTORY · CHECK SIX WITH F',
+      escape: 'FIGHTER INTERCEPTION · ESCAPE TO THE SEA', homeward: 'OPTIONAL RETURN TO RAF HAWKINGE', landing: 'LAND ON THE HOME RUNWAY AND STOP' };
+    g.fillStyle = 'rgba(5,9,12,0.62)'; g.fillRect(0, 0, W, 58);
+    g.textAlign = 'left'; g.fillStyle = AMBER; g.font = `700 12px ${FONT}`;
+    g.fillText(m.title || 'BRISTOL BEAUFIGHTER / WIRELESS FACTORY RAID', 20, 23, W - 40);
+    g.fillStyle = '#eee6d6'; g.font = `12px ${FONT}`; g.fillText(m.spec ? m.phaseText : stages[m.stage] || stages.takeoff, 20, 43, W - 40);
+    const w = m.waypoint, dx = w.x - p.pos.x, dz = w.z - p.pos.z;
+    const distance = Math.hypot(dx, dz), bearing = (Math.atan2(dx, -dz) * 180 / Math.PI + 360) % 360;
+    const x = Math.max(20, W - 300), y = W < 700 ? 235 : 80;
+    g.fillStyle = 'rgba(5,9,12,0.65)'; g.fillRect(x - 10, y - 18, Math.min(280, W - 30), 148);
+    g.fillStyle = AMBER; g.font = `700 12px ${FONT}`; g.fillText(w.name, x, y);
+    g.fillStyle = '#eee6d6'; g.font = `12px ${FONT}`;
+    g.fillText(`HDG ${String(Math.round(bearing) % 360).padStart(3, '0')} · ${(distance / 1000).toFixed(1)} KM`, x, y + 20);
+    g.fillText(`SUGGESTED HEIGHT ${Math.round(w.agl * 3.281)} FT AGL`, x, y + 39);
+    g.fillText(m.statusText || `${m.playerHits} BOMB HITS · B RELEASE · C CAMERA`, x, y + 58, 270);
+    const high = (!m.spec || ['convoy','precision','norway'].includes(m.key)) && !m.escaped && m.activeGuns > 0 && p.agl > 120 && Math.hypot(p.pos.x - m.target.x, p.pos.z - m.target.z) < 6500;
+    g.fillStyle = high || S.time < m.underFireUntil ? RED : AMBER;
+    g.fillText(high ? 'TOO HIGH — DEADLIER AA ABOVE 400 FT' : m.defenceState, x, y + 78, 270);
+    g.fillStyle = AMBER;
+    g.fillText(`WINGMEN: ${m.wingOrderLabel}`, x, y + 98);
+    g.font = `11px ${FONT}`;
+    g.fillText(m.orderHelp || '1 SUPPRESS AA · 2 COVER · 3 BOMB WORKS', x, y + 118, 270);
+    const point = {};
+    const wy = this.world.groundAt(w.x, w.z) + w.agl;
+    if (this.proj(S.vp, w.x - S.cam.x, wy - S.cam.y, w.z - S.cam.z, point) && point.x > 20 && point.x < W - 20 && point.y > 80 && point.y < this.H - 180) {
+      g.strokeStyle = AMBER; g.lineWidth = 2;
+      g.beginPath(); g.arc(point.x, point.y, 18, 0, Math.PI * 2); g.stroke();
+      g.textAlign = 'center'; g.fillStyle = AMBER; g.fillText(w.name, point.x, point.y - 27);
+    }
   }
 
   flightHud(S) {
@@ -187,7 +222,7 @@ export class HUD {
       g.font = `600 11px ${FONT}`;
       wx += 70;
     });
-    if (T.bombs) { g.fillStyle = AMBER_D; g.fillText('BOMBS', wx, by + 8); g.font = `600 20px ${FONT}`; g.fillStyle = p.bombs ? AMBER : RED; g.fillText(String(p.bombs), wx, by + 32); g.font = `600 11px ${FONT}`; }
+    if (T.bombs) { g.fillStyle = AMBER_D; g.fillText(T.bombKind === 'rocket25' ? '25 LB ROCKETS' : T.bombKind === 'torpedo18' ? 'TORPEDO' : 'BOMBS', wx, by + 8); g.font = `600 20px ${FONT}`; g.fillStyle = p.bombs ? AMBER : RED; g.fillText(String(p.bombs), wx, by + 32); g.font = `600 11px ${FONT}`; }
   }
 
   warnings(S) {
@@ -260,11 +295,19 @@ export class HUD {
     for (const t of S.groundTargets) {
       const rx = t.x - S.cam.x, ry = t.y + 8 - S.cam.y, rz = t.z - S.cam.z;
       const d = Math.hypot(rx, ry, rz);
-      if (d > 9000 || !this.proj(vp, rx, ry, rz, o)) continue;
-      g.strokeStyle = 'rgba(255,200,90,0.8)'; g.lineWidth = 1.2;
+      if (d > (t.raidGun ? 2200 : 9000) || !this.proj(vp, rx, ry, rz, o)) continue;
+      g.strokeStyle = t.kind === 'housing' ? '#7be4ff' : t.raidGun ? RED : 'rgba(255,200,90,0.8)'; g.lineWidth = 1.2;
       const s = clamp(2500 / d, 4, 10);
       g.beginPath(); g.moveTo(o.x, o.y - s); g.lineTo(o.x + s, o.y); g.lineTo(o.x, o.y + s); g.lineTo(o.x - s, o.y); g.closePath(); g.stroke();
-      if (d < 4000) { g.fillStyle = 'rgba(255,200,90,0.8)'; g.fillText(t.kind === 'hangar' ? 'HANGAR' : 'RUNWAY', o.x, o.y - s - 4); }
+      if (d < 4000) { g.fillStyle = g.strokeStyle; g.fillText(t.raidGun ? (t.heavy ? 'FLAK' : 'AA') : t.kind === 'housing' ? 'PROTECTED HOUSING' : t.kind === 'ship' ? (t.destroyer ? 'DESTROYER · AA / FLAK' : t.submarine ? 'U-BOAT · BONUS' : t.escort ? 'ARMED ESCORT' : 'MERCHANT') : t.kind === 'objective' ? 'OBJECTIVE' : t.kind === 'factory' ? 'FACTORY' : t.kind === 'hangar' ? 'HANGAR' : 'RUNWAY', o.x, o.y - s - 4); }
+      if(t.kind==='ship'&&!t.escort&&S.player?.bombs) {
+        const p=S.player, travel=Math.hypot(t.x-p.pos.x,t.z-p.pos.z)/(p.type.bombKind==='rocket25'?p.speed+BOMBS.rocket25.velocity:45);
+        const lx=t.x-Math.sin(t.yaw)*t.speed*travel,lz=t.z-Math.cos(t.yaw)*t.speed*travel;
+        if(this.proj(vp,lx-S.cam.x,(p.type.bombKind==='rocket25'?9.05+4.905*travel*travel-p.vel.y*travel:1)-S.cam.y,lz-S.cam.z,o)) {
+          g.strokeStyle=p.type.bombKind==='rocket25'&&(d<300||d>900)?'rgba(142,226,239,.45)':'#8ee2ef';g.beginPath();g.arc(o.x,o.y,9,0,Math.PI*2);g.stroke();
+          g.fillStyle='#8ee2ef';g.fillText(p.type.bombKind==='rocket25'?'ROCKET AIM · '+Math.round(d)+' M':'LEAD SHIP',o.x,o.y-14);
+        }
+      }
     }
   }
 
@@ -359,6 +402,19 @@ export class HUD {
     roundRect(g, x0, y0, size, size, 8); g.clip();
     g.drawImage(this.mapCanvas, x0, y0, size, size);
     const toMap = (x, z) => [x0 + (x + MAP_HALF) / (2 * MAP_HALF) * size, y0 + (z + MAP_HALF) / (2 * MAP_HALF) * size];
+    if (S.mission) {
+      g.strokeStyle = 'rgba(255,210,110,0.65)'; g.lineWidth = 1.5; g.beginPath();
+      const path = S.mission.returnHome ? S.mission.homeRoute : S.mission.playerHits > 0 ? S.mission.escapeRoute : S.mission.route;
+      path.forEach((w, i) => { const [x, y] = toMap(w.x, w.z); if (i === 0) g.moveTo(x, y); else g.lineTo(x, y); });
+      g.stroke();
+      const target = S.mission.target, [tx, ty] = toMap(target.x, target.z);
+      g.fillStyle = AMBER; g.fillRect(tx - 4, ty - 4, 8, 8);
+      for (const gun of target.guns) if (gun.alive) {
+        const [gx, gy] = toMap(gun.x, gun.z);
+        g.fillStyle = RED; g.fillRect(gx - 1.5, gy - 1.5, 3, 3);
+      }
+      if (S.bigMap) { g.font = `600 12px ${FONT}`; g.textAlign = 'center'; g.fillText(target.name, tx, ty - 10); }
+    }
     for (const f of this.world.fields) {
       const [mx, my] = toMap(f.x, f.z);
       g.strokeStyle = f.team === 0 ? BLUE : RED; g.lineWidth = 3;

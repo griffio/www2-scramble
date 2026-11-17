@@ -40,8 +40,13 @@ h2 { margin: 0 0 14px; letter-spacing: 0.15em; color: var(--gold); }
 button { font-family: var(--font); font-weight: 700; letter-spacing: 0.12em; color: var(--ink); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 8px 12px; cursor: pointer; font-size: 12px; }
 button:hover { border-color: var(--gold); }
 .diff button.on { background: rgba(255,196,92,0.18); border-color: var(--gold); color: #fff; }
+.scenarios { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0 14px; }
+.scenarios button { flex: 1; line-height: 1.5; }
+.scenarios button.on { border-color: var(--gold); color: var(--gold); background: rgba(255,196,92,0.12); }
+.raid-planes { grid-template-columns: 1fr; }
 #go, #again { background: var(--red); border-color: #ff7a5c; color: #fff; font-size: 18px; padding: 12px 26px; box-shadow: 0 4px 0 #7c1d12; }
 #go:hover, #again:hover { filter: brightness(1.1); }
+#retry-coast { background: var(--red); border-color: #ff7a5c; color: #fff; }
 .padfocus { outline: 2px solid var(--gold); outline-offset: 3px; }
 .padctl { margin-top: 6px; padding: 6px 10px; border-left: 2px solid var(--gold); background: rgba(255,196,92,0.06); }
 .controls { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 12px; font-size: 12.5px; color: var(--dim); line-height: 1.75; }
@@ -52,7 +57,12 @@ button:hover { border-color: var(--gold); }
 .stats div { background: rgba(255,255,255,0.04); border-radius: 6px; padding: 10px; font-size: 11px; letter-spacing: 0.15em; color: var(--dim); text-align: center; }
 .stats b { display: block; font-size: 26px; color: var(--gold); letter-spacing: 0; }
 #end .sub { color: var(--dim); }
+.debrief-note { color: var(--dim); font-size: 13px; line-height: 1.5; }
 .note { color: var(--dim); font-size: 13px; letter-spacing: 0.06em; }
 @media (max-width: 640px) { .planes { grid-template-columns: 1fr; } .panel { padding: 18px; } #title.panel-wrap { padding-left: 16px; } }
 .credits { margin-top: 8px; font-size: 11px; color: rgba(241, 230, 207, 0.5); line-height: 1.5; }
 .credits a { color: rgba(255, 196, 92, 0.75); }
+
+.scenarios button { flex: 1 1 42%; font-size: 11px; }
+#operation-card { border: 1px solid var(--line); border-radius: 6px; padding: 16px; margin: 12px 0; background: rgba(0,0,0,.15); }
+#operation-card .operation-orders { font-size: 12px; line-height: 1.7; color: var(--gold); }

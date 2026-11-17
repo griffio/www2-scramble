@@ -465,6 +465,16 @@ function synthBomb(S, rng) {
   S.drive(b, 1.4); S.fadeOut(b, 0.1);
   return S.norm(b, 0.9);
 }
+function synthRocket(S, rng) {
+  // Ignition snap, a short solid-fuel motor roar, then the exhaust rushing away.
+  const b = S.buf(.7);
+  S.mix(b, S.env(S.filt(S.noise(.045, rng), 'hp', 1600), .0002, .007), .65);
+  S.mix(b, S.env(S.tv(S.noise(.7, rng), 'lp', 6500, 600, .18), .004, .14), 1.7);
+  S.mix(b, S.env(S.filt(S.noise(.5, rng), 'bp', 420, .65), .006, .1), .65);
+  S.mix(b, S.sweep(.35, 180, 65, .08, .1, .002), .28);
+  S.drive(b, 1.35); S.filt(b, 'hp', 65); S.fadeOut(b, .12);
+  return S.norm(b, .9);
+}
 function synthRadio(S, rng) {
   const len = 0.5, b = S.buf(len), sr = S.sr;
   S.nwave(b, 0, 0.0015, 0.7);
@@ -543,7 +553,13 @@ function synthReverbIR(ctx, sec, rng) {
 // ---------------------------------------------------------------------------------------------
 const TYPES = {
   spitfire: { eng: 'merlin', rate: 1.0, twin: false, gain: 1.0, cut: 1.0 },
+  mosquitorp: { eng: 'merlin', rate: 0.95, twin: true, gain: 1.25, cut: 0.85 },
   mosquito: { eng: 'merlin', rate: 0.95, twin: true, gain: 1.25, cut: 0.85 },
+  torbeau: { eng: 'bmw801', rate: 0.82, twin: true, gain: 1.3, cut: 0.75 },
+  boston: { eng: 'bmw801', rate: 0.9, twin: true, gain: 1.2, cut: 0.8 },
+  b17: { eng: 'bmw801', rate: 0.8, twin: true, gain: 1.5, cut: 0.7 },
+  p51: { eng: 'merlin', rate: 1.05, gain: 1, cut: 1 },
+  beaufighter: { eng: 'bmw801', rate: 0.82, twin: true, gain: 1.3, cut: 0.75 },
   bf109: { eng: 'db605', rate: 1.0, twin: false, gain: 1.0, cut: 1.0 },
   fw190: { eng: 'bmw801', rate: 1.0, twin: false, gain: 1.1, cut: 0.95 },
   ju87: { eng: 'db605', rate: 0.86, twin: false, gain: 1.05, cut: 0.8 },
@@ -787,6 +803,7 @@ export class GameAudio {
     add('metal', () => many(synthImpactMetal, 3, 91)); add('ground', () => many(synthImpactGround, 3, 101)); add('water', () => many(synthImpactWater, 3, 111));
     add('clang', () => many(synthClang, 4, 121)); add('crunch', () => many(synthCrunch, 2, 131)); add('backfire', () => many(synthBackfire, 3, 141));
     add('bomb', () => many(synthBomb, 1, 151)); add('radio', () => many(synthRadio, 3, 161));
+    add('rocket', () => many(synthRocket, 3, 231));
     add('click', () => many(synthClick, 1, 171)); add('select', () => many(synthSelect, 1, 181)); add('warn', () => many(synthWarn, 1, 191)); add('kill', () => many(synthKill, 1, 201));
     add('wind', () => [B(pinkNoise(S2, 4, new Rng(211)), S2.sr)]); add('whistle', () => many(synthWhistle, 1, 221));
     for (const k in H) if (!buf[k]) buf[k] = H[k];      // recording-only slots (sirenLoop)
@@ -827,8 +844,9 @@ export class GameAudio {
     w.a.start(0, 0); w.b.start(0, 1.7);
   }
 
-  _startPlayerSources() {
-    const c = this.ctx, pe = this._pe, E = this.eng.merlin;
+  _startPlayerSources(engine = 'merlin') {
+    const c = this.ctx, pe = this._pe, E = this.eng[engine];
+    pe.engine = engine;
     pe.srcs = [];
     for (let i = 0; i < 2; i++) {
       const hi = c.createBufferSource(), lo = c.createBufferSource();
@@ -854,20 +872,22 @@ export class GameAudio {
     const c = this.ctx, now = c.currentTime, pe = this._pe, w = this._wind, L = this._L;
     const dt = clamp(now - (pe.lastT || now), 0, 0.1); pe.lastT = now;
     const active = !!p.active;
-    const twin = p.type === 'mosquito';
+    const engine = TYPES[p.type]?.eng || 'merlin';
+    const twin = !!TYPES[p.type]?.twin;
     const rpm = clamp(fin(p.rpm, 0.7), 0, 1.25), thr = sat(fin(p.throttle, 0.7));
     const speed = Math.max(0, fin(p.speed, 0)), dmg = sat(fin(p.damage, 0)), g = fin(p.gForce, 1);
     const onGround = !!p.onGround, cockpit = L.inCockpit;
 
     if (active) {
       pe.inactiveSince = 0;
-      if (!pe.srcs) this._startPlayerSources();
+      if (pe.srcs && pe.engine !== engine) this._stopPlayerSources();
+      if (!pe.srcs) this._startPlayerSources(engine);
     } else if (pe.srcs) {
       if (!pe.inactiveSince) pe.inactiveSince = now;
       else if (now - pe.inactiveSince > 1.5) this._stopPlayerSources();
     }
     if (pe.srcs) {
-      const E = this.eng.merlin;
+      const E = this.eng[engine];
       // coughs / missing beats when damaged
       if (active && dmg > 0.5) {
         if (now >= pe.nextCough) {
@@ -1493,15 +1513,29 @@ export class GameAudio {
     } catch (e) { this._fail(e); }
   }
 
+  rocketLaunch(pos, player = false) {
+    if (!this._ok() || this._muted) return;
+    try {
+      const buf = this._pick(this.buf.rocket), rate = RNG.range(.94, 1.06);
+      if (player) {
+        this._rocketSide = -(this._rocketSide || 1);
+        this._play(buf, this.bus.playerGun, .85, rate, 0, null, this._rocketSide * .22, 16000, .03, 4);
+      } else {
+        const p = this._pos(pos);
+        if (p) this._playAt(buf, this.bus.fx, p, 1.1, 55, 2200, rate, .06, 2);
+      }
+    } catch (e) { this._fail(e); }
+  }
+
   bombRelease() {
     if (!this._ok() || this._muted) return;
     try { this._play(this.buf.bomb[0], this.bus.inHead, 0.8, RNG.range(0.95, 1.05), 0, null, 0, 20000, 0.03, 3); } catch (e) { this._fail(e); }
   }
 
   // ------------------------------------------------------------------ radio voice
-  // Pre-recorded R/T lines (audio/voice/<key>.mp3, see js/voicelines.js). Lines queue (max 3, stale
+  // Prerecorded R/T clips (audio/voice/<accent>/<key>.mp3, see js/voice-assets.js). Lines queue (max 3, stale
   // ones dropped), each opens with a squelch, and the world ducks ~5 dB while someone is talking.
-  // onMissing() is called if the clip can't be loaded (the game then falls back to speechSynthesis).
+  // onMissing() retains the radio squelch; the game never synthesizes browser speech.
   // urgent lines (the player's orders, wingmen) go ahead of queued controller announcements
   voice(key, onMissing, urgent = false) {
     if (!this._ok() || this._muted || !key) return;
@@ -1514,10 +1548,22 @@ export class GameAudio {
       this._pumpVoice();
     } catch (e) { this._fail(e); }
   }
+  // Stop both a playing clip and pending loads when changing mission or disabling radio voices.
+  stopVoice() {
+    this._voiceGeneration = (this._voiceGeneration || 0) + 1;
+    this._voiceQ = []; this._voiceBusy = false;
+    clearTimeout(this._voiceReleaseTimer);
+    const src = this._voiceSource; this._voiceSource = null;
+    if (src) { src.onended = null; try { src.stop(); src.disconnect(); } catch (e) { /* already stopped */ } }
+    if (this._duck && this.ctx) {
+      const now = this.ctx.currentTime, d = this._duck.gain;
+      d.cancelScheduledValues(now); d.setTargetAtTime(1, now, .05);
+    }
+  }
   _voiceBuf(key) {
     const cache = this._voiceCache || (this._voiceCache = new Map());
     if (!cache.has(key)) {
-      cache.set(key, fetch(new URL(`../audio/voice/${key}.mp3`, import.meta.url))
+      cache.set(key, fetch(new URL(`../audio/voice/${key}`, import.meta.url))
         .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(r.status))))
         .then((b) => this.ctx.decodeAudioData(b))
         .catch(() => null));
@@ -1529,8 +1575,10 @@ export class GameAudio {
     const item = this._voiceQ && this._voiceQ.shift();
     if (!item) return;
     this._voiceBusy = true;
+    const generation = this._voiceGeneration || 0;
     let buf = null;
     try { buf = await this._voiceBuf(item.key); } catch (e) { /* */ }
+    if (generation !== (this._voiceGeneration || 0)) return;
     const c = this.ctx;
     if (!buf || this._muted || c.currentTime - item.t > 8 || c.state !== 'running') {
       this._voiceBusy = false;
@@ -1541,13 +1589,16 @@ export class GameAudio {
     const now = c.currentTime, t0 = now + 0.14, end = t0 + buf.duration;
     this.radio();
     const src = c.createBufferSource();
+    this._voiceSource = src;
     src.buffer = buf; src.connect(this._voiceBus); src.start(t0);
     const d = this._duck.gain;
     d.cancelScheduledValues(now); d.setTargetAtTime(0.55, now, 0.08); d.setTargetAtTime(1, end, 0.3);
     src.onended = () => {
       try { src.disconnect(); } catch (e) { /* */ }
+      if (generation !== (this._voiceGeneration || 0)) return;
+      this._voiceSource = null;
       if (!this._muted) this._play(this._pick(this.buf.radio), this.bus.ui, 0.3, 1.1, 0, null, 0, 20000, 0, 3);   // release squelch
-      setTimeout(() => { this._voiceBusy = false; this._pumpVoice(); }, 350);
+      this._voiceReleaseTimer = setTimeout(() => { this._voiceBusy = false; this._pumpVoice(); }, 350);
     };
   }
 

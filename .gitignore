@@ -3,3 +3,5 @@ node_modules/
 _site/
 .env
 tools/ai-sfx/
+
+tools/voices/cache/

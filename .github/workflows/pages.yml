@@ -33,6 +33,13 @@ jobs:
         run: |
           for f in js/*.js; do node --check "$f"; done
           node tools/battle.mjs normal 3 1
+          node tools/raidtest.mjs
+          node tools/operationstest.mjs
+          node tools/norwaytest.mjs
+          node tools/rocketaudiotest.mjs
+          node tools/menutest.mjs
+          node tools/voices/make-voices.mjs check
+          node tools/voicetest.mjs
 
       # No build step: stage only the files the game serves (not tools/, docs/ or node_modules)
       - name: Stage site
