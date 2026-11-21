@@ -85,7 +85,7 @@ export class OperationsMission extends FactoryRaid {
   get guardBomber() { const b=this.bombers.filter(b=>b.alive&&!this.recovered.has(b)); return b.sort((a,b)=>a.hp/a.type.hp-b.hp/b.type.hp)[0]; }
   get defenceState() { return this.sim.time<this.underFireUntil?'INCOMING FIRE — BREAK!':`${this.interceptors.filter(a=>a.alive).length} INTERCEPTORS · ${this.activeGuns} AA GUNS`; }
   get statusText() {
-    if(this.key==='convoy') return `${this.target.halls.filter(t=>!t.alive&&!t.escort).length}/2 SUNK · ${this.torpedoEnvelope(this.sim.player)?'RELEASE READY':'OUTSIDE RELEASE LIMITS'}`;
+    if(this.key==='convoy') return `${this.target.halls.filter(t=>!t.alive&&!t.escort).length}/2 SUNK · ${this.torpedoReleaseStatus(this.sim.player)}`;
     if(this.key==='norway') return `${this.target.halls.filter(t=>!t.alive&&!t.escort).length}/${this.target.halls.filter(t=>!t.escort).length} MERCHANTS SUNK · ${this.sim.player.bombs} ROCKETS`;
     if(this.key==='precision') return `${this.playerHits} BOMB HITS · HOUSING ${this.collateral?'HIT':'CLEAR'} · B RELEASE`;
     if(this.key==='intercept') return `${this.stoppedBombers}/3 BOMBERS STOPPED · ${this.delivered.size} RELEASED`;
@@ -223,10 +223,22 @@ export class OperationsMission extends FactoryRaid {
     this.target.x=this.target.halls[0].x;this.target.z=this.target.halls[0].z;
   }
   torpedoEnvelope(a) {return a.agl>=15&&a.agl<=45&&a.speed>=70&&a.speed<=115&&Math.abs(a.bankAngle)<12*DEG&&Math.abs(a.vel.y)<6&&this.sim.world.heightAt(a.pos.x,a.pos.z)<=0;}
+  torpedoReleaseStatus(a) {
+    if (!a.bombs) return 'TORPEDO EXPENDED';
+    if (a.state !== 'air') return 'GET AIRBORNE';
+    if (this.sim.world.heightAt(a.pos.x,a.pos.z)>0) return 'GET OVER WATER';
+    if (a.agl<15) return 'CLIMB · AIM 100 FT';
+    if (a.agl>45) return 'DESCEND · AIM 100 FT';
+    if (a.speed<70) return 'SPEED UP · AIM 210 MPH';
+    if (a.speed>115) return 'SLOW DOWN · AIM 210 MPH';
+    if (Math.abs(a.bankAngle)>=12*DEG) return 'LEVEL THE WINGS';
+    if (Math.abs(a.vel.y)>=6) return 'STEADY THE HEIGHT';
+    return 'RELEASE READY · B / RMB';
+  }
   canReleaseWeapon(a) {
     if(this.key==='norway') return true;
     if(a.type.bombKind!=='torpedo18'||this.torpedoEnvelope(a)) return true;
-    if(a.isPlayer&&this.sim.time-(this.lastReleaseWarning??-10)>4) {this.lastReleaseWarning=this.sim.time;this.sim.radio(a.team,'OBSERVER: Hold release. 15–45 metres, 70–115 metres per second, wings level over water.','alert','torpedo_hold');}
+    if(a.isPlayer&&this.sim.time-(this.lastReleaseWarning??-10)>4) {this.lastReleaseWarning=this.sim.time;this.sim.radio(a.team,'OBSERVER: Hold release. Aim for 100 feet and 210 mph over water. Wings level, steady height.','alert','torpedo_hold');}
     return false;
   }
   stepTorpedo(b,dt) {

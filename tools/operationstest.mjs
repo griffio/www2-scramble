@@ -91,7 +91,16 @@ console.log('PASS: interception abort/delivery outcomes, damaged bomber and fini
   const initial=t.x;m.beforeStep(10);assert.ok(t.x>initial+40);assert.equal(m.target.guns[0].x,t.x);
   p.pos.y=150;p.agl=150;p.ctl.bomb=true;s.weapons(p,SIM_DT);assert.equal(p.bombs,1);assert.equal(s.bombs.length,0);
   p.pos.y=30;p.agl=30;p.vel.set(95,0,0);p.speed=95;p.q.setHPR(Math.PI/2,0,0);p.updateBasis();
+  assert.equal(m.torpedoReleaseStatus(p),'RELEASE READY · B / RMB');
+  for (const [field,value,message] of [['agl',14,'CLIMB · AIM 100 FT'],['agl',46,'DESCEND · AIM 100 FT'],['speed',69,'SPEED UP · AIM 210 MPH'],['speed',116,'SLOW DOWN · AIM 210 MPH']]) {
+    const previous=p[field];p[field]=value;
+    assert.equal(m.torpedoEnvelope(p),false);
+    assert.equal(m.torpedoReleaseStatus(p),message);p[field]=previous;
+  }
+  assert.equal(m.torpedoReleaseStatus({bombs:1,state:'air',pos:p.pos,agl:30,speed:95,bankAngle:13*Math.PI/180,vel:p.vel}),'LEVEL THE WINGS');
+  p.vel.y=6;assert.equal(m.torpedoReleaseStatus(p),'STEADY THE HEIGHT');p.vel.y=0;
   s.weapons(p,SIM_DT);assert.equal(p.bombs,0);assert.equal(s.bombs[0].kind,'torpedo18');
+  assert.equal(m.torpedoReleaseStatus(p),'TORPEDO EXPENDED');
   let n=0;while(!s.bombs[0]?.running&&n++<200)s.stepBombs(SIM_DT);
   assert.ok(s.bombs[0].running);assert.ok(Math.abs(Math.hypot(s.bombs[0].vx,s.bombs[0].vz)-45)<1e-6);
   const weapon=s.bombs[0];weapon.x=t.x-200;weapon.z=t.z;weapon.vx=1000;weapon.vz=0;

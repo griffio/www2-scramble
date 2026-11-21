@@ -187,7 +187,10 @@ export class HUD {
     g.fillText('AIRSPEED', x0 + 12, y0 + 20); g.fillText('ALTITUDE', x0 + 126, y0 + 20);
     g.font = `600 30px ${FONT}`; g.fillStyle = AMBER;
     g.fillText(`${Math.round(p.speed * 2.237)}`, x0 + 12, y0 + 52);
-    g.fillText(`${Math.round(Math.max(0, (p.agl ?? p.pos.y) - p.gearH0) * 3.281 / 10) * 10}`, x0 + 126, y0 + 52);   // height above the ground
+    // Torpedo guidance uses the same AGL reference as the release interlock.
+    const torpedo = T.bombKind === 'torpedo18';
+    const height = Math.max(0, (p.agl ?? p.pos.y) - (torpedo ? 0 : p.gearH0)) * 3.281;
+    g.fillText(`${torpedo ? Math.round(height) : Math.round(height / 10) * 10}`, x0 + 126, y0 + 52);
     g.font = `600 12px ${FONT}`; g.fillStyle = AMBER_D;
     g.fillText('MPH', x0 + 80, y0 + 52); g.fillText('FT', x0 + 208, y0 + 52);
     // throttle / boost
