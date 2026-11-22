@@ -1,7 +1,7 @@
 // Voice integration: mission coverage, male accent packs and asynchronous playback cancellation.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { LINES, AMERICAN_KEYS, voicePackFor } from '../js/voicelines.js';
+import { LINES, CAPTION_ONLY_LINES, AMERICAN_KEYS, voicePackFor } from '../js/voicelines.js';
 import { VOICE_ASSETS } from '../js/voice-assets.js';
 import { SCENARIOS } from '../js/scenarios.js';
 import { World } from '../js/world.js';
@@ -17,6 +17,10 @@ const played=[],g=Object.create(Game.prototype);
 g.voice=true;g.audio={voice:asset=>played.push(asset),radio(){}};
 globalThis.window={get speechSynthesis(){throw new Error('browser speech must never run');}};
 function verifyKey(key,scenario) {
+  if(scenario==='fjord' && CAPTION_ONLY_LINES[key]) {
+    const before=played.length;g.sim={world:{scenario}};g.say(key);
+    assert.equal(played.length,before,'unrecorded mission dialogue uses caption/squelch fallback');return;
+  }
   assert.ok(LINES[key],`${scenario}: script for ${key}`);
   const pack=voicePackFor(scenario),asset=VOICE_ASSETS[`${pack}/${key}`];
   assert.ok(asset,`${scenario}: ${pack} recording for ${key}`);
@@ -39,7 +43,7 @@ for(const [scenario,spec]of Object.entries(SCENARIOS)) {
 for(const key of AMERICAN_KEYS)verifyKey(key,'fortress');
 for(const stage of ['takeoff','coast','channel','country','approach','release','egress','escape','homeward','landing'])verifyKey('factory_'+stage,'factory');
 const before=played.length;g.say(null,'Uncatalogued message');g.say('not_a_recording','Missing message');g.voice=false;g.say('fortress_intro');assert.equal(played.length,before,'missing/disabled lines cannot synthesize browser speech');
-console.log('PASS: all mission intros, orders, warnings, outcomes and shared US calls use recorded clips in the correct accent');
+console.log('PASS: recorded mission dialogue uses the correct accent; fjord captions safely handle pending recordings');
 
 // A late British fetch must not interrupt or play over the next American sortie.
 const waits=new Map(),sources=[],duck={cancelScheduledValues(){},setTargetAtTime(){}};

@@ -15,6 +15,8 @@ export const P = {
   dust: { tile: 0, life: 1.6, s0: 1.2, s1: 5, c0: [0.45, 0.38, 0.28, 0.55], c1: [0.55, 0.5, 0.4, 0], drag: 2.5, buoy: 0.5, g: 0 },
   bigDust: { tile: 0, life: 5, s0: 8, s1: 30, c0: [0.35, 0.3, 0.24, 0.75], c1: [0.5, 0.46, 0.4, 0], drag: 1.2, buoy: 2.5, g: 0 },
   splash: { tile: 0, life: 1.4, s0: 1.0, s1: 4, c0: [0.85, 0.9, 0.95, 0.6], c1: [0.9, 0.95, 1.0, 0], drag: 0.8, buoy: 0, g: 9.8 },
+  rocketTrail: { tile: 0, life: 2.4, s0: 3.2, s1: 4.2, c0: [0.88, 0.9, 0.92, 0.325], c1: [0.9, 0.92, 0.94, 0], drag: 1.8, buoy: 0.1, g: 0 },
+  waterMist: { tile: 0, life: 2.8, s0: 5, s1: 24, c0: [0.88, 0.94, 1, 0.7], c1: [0.95, 0.98, 1, 0], drag: 1.4, buoy: 0.3, g: 0.5 },
   spray: { tile: 0, life: 3, s0: 4, s1: 18, c0: [0.85, 0.9, 0.95, 0.7], c1: [0.9, 0.95, 1.0, 0], drag: 0.6, buoy: 0, g: 9.8 },
   flak: { tile: 0, life: 7, s0: 5, s1: 15, c0: [0.06, 0.06, 0.06, 0.85], c1: [0.2, 0.2, 0.2, 0], drag: 1.5, buoy: 0.2, g: 0 },
   debris: { tile: 3, life: 3.5, s0: 0.9, s1: 0.9, c0: [0.25, 0.24, 0.22, 1], c1: [0.2, 0.2, 0.2, 1], drag: 0.3, buoy: 0, g: 9.8 },
@@ -104,9 +106,9 @@ export function explosion(ps, x, y, z, size, kind, vx = 0, vy = 0, vz = 0) {
     for (let k = 0; k < 18 * s; k++) ps.emit(P.spray, x + rs(4 * s), 0.5, z + rs(4 * s), rs(8 * s), 15 + rnd() * 30 * s, rs(8 * s), s * 0.7, 1.4);
   }
 }
-export function flakBurst(ps, x, y, z) {
+export function flakBurst(ps, x, y, z, lingering = false) {
   ps.emit(P.flash, x, y, z, 0, 0, 0, 1.1);
-  for (let k = 0; k < 5; k++) ps.emit(P.flak, x + rs(3), y + rs(3), z + rs(3), rs(3), rs(2), rs(3), 0.8 + rnd() * 0.5);
+  for (let k = 0; k < (lingering ? 8 : 5); k++) ps.emit(P.flak, x + rs(3), y + rs(3), z + rs(3), rs(3), rs(2), rs(3), (0.8 + rnd() * 0.5) * (lingering ? 1.5 : 1));
   for (let k = 0; k < 6; k++) ps.emit(P.spark, x, y, z, rs(80), rs(80), rs(80), 1.2);
 }
 export function impact(ps, x, y, z, water, big) {
@@ -118,4 +120,51 @@ export function hitSparks(ps, x, y, z, vx, vy, vz, big) {
   ps.emit(P.flash, x, y, z, vx, vy, vz, big ? 0.35 : 0.2);
   for (let k = 0; k < (big ? 6 : 3); k++) ps.emit(P.spark, x, y, z, vx + rs(25), vy + rs(25), vz + rs(25), 1);
   if (big) ps.emit(P.smoke, x, y, z, vx * 0.9, vy * 0.9, vz * 0.9, 0.4);
+}
+
+// Arcade impact spectacle only: solid shot still has no blast damage.
+export function rocketImpact(ps, x, y, z, surface) {
+  if(surface !== 'water') {
+    explosion(ps,x,y+1,z,surface==='ship'?2.2:1.9,surface==='ship'?'rocket':'ground');
+    return;
+  }
+  ps.emit(P.flash,x,.8,z,0,0,0,1.5);
+  // Tall white column, a spreading apron, then mist that marks the miss for the next pass.
+  for(let k=0;k<24;k++) ps.emit(P.spray,x+rs(3),1,z+rs(3),rs(7),35+rnd()*40,rs(7),1.1+rnd()*.7,1.25);
+  for(let k=0;k<18;k++) {
+    const angle=k*Math.PI*2/18,speed=15+rnd()*18;
+    ps.emit(P.splash,x,.5,z,Math.cos(angle)*speed,10+rnd()*15,Math.sin(angle)*speed,2+rnd(),1.5);
+  }
+  for(let k=0;k<10;k++) ps.emit(P.waterMist,x+rs(5),3+rnd()*8,z+rs(5),rs(7),5+rnd()*8,rs(7),1+rnd()*.5);
+}
+
+// Compact shell bursts remain distinct from the much larger rocket strikes.
+export function cannonImpact(ps,x,y,z,surface) {
+  ps.emit(P.flash,x,y,z,0,0,0,.85);
+  for(let k=0;k<3;k++) ps.emit(P.fireball,x+rs(.6),y+rs(.6),z+rs(.6),rs(5),3+rnd()*5,rs(5),.45+rnd()*.2,.55);
+  for(let k=0;k<3;k++) ps.emit(P.blackSmoke,x+rs(1),y+1,z+rs(1),rs(3),3+rnd()*5,rs(3),.4+rnd()*.2,.65);
+  for(let k=0;k<12;k++) ps.emit(P.spark,x,y,z,rs(45),10+rnd()*30,rs(45),1.4+rnd(),1.4);
+  for(let k=0;k<4;k++) ps.emit(P.debris,x,y+.5,z,rs(15),6+rnd()*14,rs(15),.25+rnd()*.25,.6);
+  if(surface!=='ship') for(let k=0;k<3;k++) ps.emit(P.dust,x,y,z,rs(6),5+rnd()*5,rs(6),1.5,.9);
+}
+
+// Sample distance travelled, rather than a timer, so fast rockets leave a connected ribbon.
+export function rocketTrail(ps, rocket, dt) {
+  if(rocket.trailX === undefined) {
+    const age=Math.min(rocket.t,dt,.1);
+    rocket.trailX=rocket.x-rocket.vx*age;
+    rocket.trailY=rocket.y-rocket.vy*age-4.905*age*age;
+    rocket.trailZ=rocket.z-rocket.vz*age;
+    ps.emit(P.rocketTrail,rocket.trailX,rocket.trailY,rocket.trailZ);
+  }
+  const dx=rocket.x-rocket.trailX,dy=rocket.y-rocket.trailY,dz=rocket.z-rocket.trailZ;
+  const distance=Math.hypot(dx,dy,dz),count=Math.min(96,Math.floor(distance/3));
+  if(!count)return;
+  const step=count===96?distance/count:3;
+  for(let i=1;i<=count;i++) {
+    const t=i*step/distance;
+    ps.emit(P.rocketTrail,rocket.trailX+dx*t,rocket.trailY+dy*t,rocket.trailZ+dz*t);
+  }
+  const t=count*step/distance;
+  rocket.trailX+=dx*t;rocket.trailY+=dy*t;rocket.trailZ+=dz*t;
 }

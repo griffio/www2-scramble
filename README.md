@@ -305,3 +305,68 @@ node tools/menutest.mjs
 Norwegian Coastal Strike uses a dedicated RP-3 Mosquito loadout: eight rockets on separate wing hardpoints, with B/RMB firing a rapid salvo. The cyan rocket aim cue allows for ship movement and ballistic drop; close to 300–900 m and lower the nose towards the cue before firing. Solid shot must cross an actual hull; it has no blast damage. Two hits sink a merchant in the game. Order 1 suppresses the guns, 2 recalls the section to cover, and 3 sends wingmen on aimed rocket runs. Sink at least one merchant and fly west to escape; the surfaced U-boat is an optional bonus target. The coastal sector uses the existing compressed terrain, rather than a geographic recreation of Norway. `norwaytest` covers live starts, deck guns, wingman attacks, rocket hits and misses, and success/failure outcomes.
 
 The Norwegian convoy now contains six merchant ships, a German escort destroyer and a surfaced U-boat. The destroyer carries two light AA positions and two heavy flak batteries; stay low to avoid the heavy guns, and use wingman suppression to clear a firing run. Deck guns move and turn with their vessel, can be destroyed individually, and cease fire when their ship sinks. The destroyer and U-boat add bonus score; sinking a merchant and escaping west remains the main objective.
+
+### Into the Fjord
+
+Select **INTO THE FJORD** for a Black Friday-inspired Beaufighter rocket strike against
+**Z33**, the German destroyer attacked in Førdefjord on 9 February 1945.
+The full sortie starts airborne outside the fjord; **PRACTISE FROM FJORD APPROACH**
+skips the ingress. Both starts have three wingmen, full cannon ammunition and eight
+manually fired RP-3 rockets per aircraft.
+
+Follow the water through the dogleg. **1** orders cannon suppression while preserving
+wingmen's rockets, **3** orders rocket attacks on Z33, and **2** recalls the section
+and covers your withdrawal. Hold **B / RMB** for a rocket salvo at 300–900 m;
+aim into the hull with the cyan ballistic cue. Two section rocket hits and at least
+50% hull damage cripple Z33. Cannon fire and sinking the escorts do not satisfy that
+objective. Escape west through the mouth to complete the mission. You can turn back
+for the sinking bonus, but fighters arrive 24 seconds after the flight reaches the
+anchorage or first fires rockets; lingering brings one final pair after 90 seconds.
+The HUD shows the countdown. Approach batteries now put a time-fused barrage above
+the water, with denser light-AA tracer bursts, heavier gun reports, lingering smoke
+and fading fjord echoes. Barrage bursts stay at least 140 m above sea level; flying
+low keeps you beneath them, while light guns remain a threat. The extra tracer rounds
+have lower damage and wider aim spread. All batteries can be silenced with cannon.
+Stay low to avoid aimed heavy flak and use the water corridor
+to avoid the mountain walls.
+
+The debrief rewards crippling/sinking Z33, surviving wingmen, aircraft condition,
+guns silenced and low flying. Wingman survival is worth more than fighter kills.
+Retries reset the ships, guns, aircraft, weapons and mission state; records are
+separate for full ingress, practice and pilot difficulty.
+
+This is a playable historical adaptation: the fjord, escort vessels, rocket damage,
+solid-shot loadout, arrival timings and successful crippling/sinking outcomes are tuned
+for the game, rather than a reconstruction of the raid's outcome. Historical source:
+[Australian War Memorial photograph of the attack on Z33](https://www.awm.gov.au/collection/C357245).
+New mission dialogue currently uses radio captions and squelch; compatible shared orders
+and combat warnings retain their recordings. New recordings could not be generated
+because the connected ElevenLabs account has insufficient credits. Their scripts are
+kept separately in `CAPTION_ONLY_LINES` in `js/voicelines.js`.
+
+```sh
+node tools/fjordtest.mjs
+node tools/fjorddefencetest.mjs
+```
+
+This checks the navigable water corridor and mountain walls, both starts, actual rocket
+release and hull hits, physically flown wingman attacks, primary versus secondary
+objectives, finite fighter waves, withdrawal, scoring and ammunition exhaustion.
+
+Rocket strikes now have larger presentation effects and louder positional impact reports.
+Sea misses create tall white spray columns and lingering mist; land misses throw up dirt
+and debris. The fjord adds a fading impact echo. These effects add no blast damage to
+the solid-shot weapon. Both RP-3 aircraft have permanent metallic launch rails and
+mounting brackets that remain visible after firing.
+
+Cannon strikes on ships, buildings and parked aircraft now produce compact shell bursts,
+metal sparks, fragments and smoke, with a sharper impact report audible at combat
+distances. Simultaneous hits share a report to keep the mix clear. Cannon rounds now
+deal 0.5 hull HP each (20 HP per second if all four Beaufighter cannons hit), and 6 HP
+to AA mounts: four hits silence light AA, seven silence heavy AA. Exposed deck guns
+are checked before the hull, and collision height is measured from the sea surface.
+Rockets still deal 115 HP per hull hit and remain the fastest anti-shipping weapon.
+
+Rocket exhaust now forms continuous white smoke trails throughout flight. Trail particles
+are spaced along the ballistic path every three metres and fade over roughly 2.4 seconds,
+so the line stays connected at different frame rates and shows each rocket’s direction.

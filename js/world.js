@@ -69,6 +69,10 @@ function fieldMask(x, z, fields) {
   return [m, e];
 }
 
+// Compressed navigable fjord: broad mouth, a gentle dogleg and steep rock walls.
+export const fjordCentre = x => 800 + 400 * Math.sin(x / 1900);
+export const fjordWidth = x => 760 + 1050 * (1 - smoothstep(-6500, -2800, x));
+
 export class World {
   constructor({ scenario = 'channel' } = {}) {
     this.scenario = scenario;
@@ -78,6 +82,11 @@ export class World {
     this.towns = raid ? [...TOWNS.filter((t) => t.side === 0),
       { name: 'EINDHOVEN', x: 500, z: 12300, r: 1000, n: 320, side: 1, church: 2 },
       { name: 'DUTCH FARMLAND', x: -4500, z: 6500, r: 500, n: 75, side: 1, church: 1 }] : TOWNS;
+    if (scenario === 'fjord') {
+      this.fields = [makeField(TEAM.RAF, 'COASTAL COMMAND RECOVERY', -14000, -8000, Math.PI, 62),
+        makeField(TEAM.LW, 'JG 5 HILLTOP STRIP', 12000, 12000, 0, 300)];
+      this.towns = [{name:'FJORD HAMLET',x:2200,z:2600,r:350,n:35,side:1,church:0}];
+    }
     const t0 = Date.now();
     const N = HM_N;
     this.N = N; this.cell = HM_CELL; this.x0 = HM_X0;
@@ -123,6 +132,15 @@ export class World {
           h = lerp(-3, h, smoothstep(18, 65, canal));
           if (Math.abs(x + 1800) < 380 && Math.abs(z - 11500) < 420) h = 16;
         }
+        if (scenario === 'fjord') {
+          const bank = Math.abs(z - fjordCentre(x)) - fjordWidth(x);
+          const shore = smoothstep(0, 1700, bank);
+          h = x < -8500 ? -45 : bank < 0 ? -35 : 2 + shore * (640 + hn * 560);
+          // The head closes beyond the anchorage; the western mouth stays open.
+          h = Math.max(h, smoothstep(4300, 6500, x) * (650 + hn * 300) - 35);
+          if (bank < 0 && x < 4300) h = -35;
+          h = Math.max(h, 62 - 110 * smoothstep(1400, 3000, Math.hypot(x + 14000, z + 8000)));
+        }
         const [fm, fe] = fieldMask(x, z, this.fields);
         if (fm > 0 && h > 0) h = lerp(h, fe, fm);
         const k = j * N + i;
@@ -134,7 +152,7 @@ export class World {
         this.mat[k * 4] = Math.round(forest * 255);
         this.mat[k * 4 + 1] = Math.round(tm * 255 * (h > 1 ? 1 : 0));
         this.mat[k * 4 + 2] = Math.round(fm * 255);
-        this.mat[k * 4 + 3] = Math.round(cliff * 255 * (h > 0 ? 1 : 0) * (1 - smoothstep(30, 160, d)));
+        this.mat[k * 4 + 3] = Math.round((scenario === 'fjord' ? .7 : cliff) * 255 * (h > 0 ? 1 : 0) * (1 - smoothstep(30, 160, d)));
       }
     }
     // normals
@@ -238,10 +256,12 @@ export class World {
     }
     this.trees = trees;
     // coastal landmarks
+    if(this.scenario !== 'fjord') {
     add('lighthouse', 4300, coastN(4300) - 120, 0, 1);
     add('lighthouse', -500, coastS(-500) + 90, 0, 1);
     // Chain Home radar station (four tall masts) on the English cliffs
     for (let k = 0; k < 4; k++) add('radarMast', 9000 + k * 160, coastN(9000) - 700 - (k % 2) * 90, 0, 1);
+    }
     this.masts = (S.radarMast || []).map((m) => ({ x: m[0], z: m[2], y: m[1], h: 100, r: 9 }));
 
     // ---------------------------------------------------------- airfields
@@ -260,16 +280,21 @@ export class World {
   }
 
   buildOperation() {
-    const convoy = this.scenario === 'convoy', norway = this.scenario === 'norway', precision = this.scenario === 'precision';
-    const f = this.operationTarget = { name: convoy ? 'MERCHANT CONVOY' : norway ? 'COASTAL SHIPPING' : precision ? 'HEADQUARTERS' : 'SUPPLY DEPOT',
+    const fjord = this.scenario === 'fjord', convoy = this.scenario === 'convoy', norway = this.scenario === 'norway' || fjord, precision = this.scenario === 'precision';
+    const f = this.operationTarget = { name: fjord ? 'Z33 — DESTROYER ANCHORAGE' : convoy ? 'MERCHANT CONVOY' : norway ? 'COASTAL SHIPPING' : precision ? 'HEADQUARTERS' : 'SUPPLY DEPOT',
       x: (convoy || norway) ? -1500 : -7000, z: (convoy || norway) ? 800 : 11000, y: 0, halls: [], guns: [], protected: [] };
+    if(fjord) { f.x=1800; f.z=fjordCentre(f.x); }
     f.y = this.groundAt(f.x, f.z);
     const add = (kind, x, z, r, h, hp, extra = {}) => {
       const t = { kind, operationTarget: true, team: TEAM.LW, field: this.fields[1], x, z, y: this.groundAt(x,z),
         yaw: 0, r, h, hp, maxHp: hp, alive: true, ...extra };
       this.targets.push(t); return t;
     };
-    if (norway) {
+    if (fjord) {
+      f.halls.push(add('ship',f.x,f.z,64,17,460,{y:0,yaw:0,speed:0,length:128,beam:12,escort:true,destroyer:true,primary:true,sink:0}));
+      for(const [dx,dz] of [[-550,-350],[650,200]]) f.halls.push(add('ship',f.x+dx,f.z+dz,35,14,220,
+        {y:0,yaw:0,speed:0,length:65,beam:10,escort:true,sink:0}));
+    } else if (norway) {
       // Six merchants in two columns, a destroyer on the exposed flank, and a U-boat.
       for(let i=0;i<6;i++) f.halls.push(add('ship',f.x+(i%3)*650,f.z-Math.floor(i/3)*650,55,14,220,
         {y:0,yaw:-Math.PI/2,speed:4.5,length:105,beam:15,escort:false,sink:0}));
@@ -297,6 +322,19 @@ export class World {
               reaction:1.4,reload:4,shotGap:.4,burstLength:4,burstPause:2.8,damageScale:.5,aimError:1.4,
               aimYaw:0,aimPitch:.4,cool:f.guns.length*.17}));
         }
+      }
+      if(fjord) for(const [x,side,heavy,barrage] of [
+        [-3900,-1,false,false],[-3200,1,true,true],[-2100,1,false,false],[-1500,-1,true,true],
+        [-900,-1,false,false],[1000,1,false,false],[2500,-1,true,false]]) {
+        const z=fjordCentre(x)+side*(fjordWidth(x)+120);
+        f.guns.push(add(heavy?'flak':'lightAA',x,z,4,2.5,heavy?42:24,
+          {raidGun:true,heavy,barrage,burstFloor:barrage?140:0,range:heavy?3400:2300,minAlt:barrage?0:heavy?100:3,reaction:1.6,reload:barrage?2.5:4,
+           shotGap:.45,burstLength:3,burstPause:3.2,damageScale:.45,aimError:1.6,aimYaw:0,aimPitch:.4,cool:1}));
+      }
+      if(fjord) for(const gun of f.guns) if(!gun.heavy) {
+        // Denser tracer bursts, with less damage per round and a wider pattern.
+        gun.shotGap=.2;gun.burstLength=6;gun.burstPause=2.6;
+        gun.damageScale=.27;gun.aimError=1.9;
       }
       return;
     }

@@ -107,3 +107,24 @@ for(const start of ['runway','coast']) {
  console.log(`PASS: wingmen sink shipping with ${fired} rocket releases in ${s.time.toFixed(1)}s`);
 }
 console.log('PASS: Norway starts, moving AA mounts, orders, ballistic hits/misses, swept collisions, score, escape and failure');
+
+// Exposed deck guns take shell hits before the hull, using their actual mount elevation.
+{
+ const s=fresh(),m=s.mission,p=s.player,ship=m.target.halls.find(t=>t.destroyer);
+ for(const heavy of [false,true]) {
+  const gun=m.target.guns.find(g=>g.vessel===ship&&g.heavy===heavy),hullHP=ship.hp;
+  const rounds=Math.ceil(gun.maxHp/6);
+  for(let i=0;i<rounds;i++) {
+   s.bullets.add(gun.x-860*SIM_DT,gun.y+1,gun.z,860,0,0,0,0,p);
+   s.stepBullets(SIM_DT);
+  }
+  assert.equal(gun.alive,false,'physical cannon rounds destroy the elevated deck mount');
+  assert.equal(ship.hp,hullHP,'the hull cannot absorb a deck-gun hit');
+ }
+ const hp=ship.hp;
+ for(let i=0;i<40;i++)assert.ok(s.bulletStructures(ship.x,ship.z,0,'cannon',p,8));
+ assert.ok(Math.abs(ship.hp-(hp-20))<1e-8,'one second of four-cannon hits deals 20 hull HP');
+ const before=ship.hp;s.bulletStructures(ship.x,ship.z,0,'mg',p,8);
+ assert.ok(Math.abs(ship.hp-(before-.004))<1e-8,'rifle-calibre penetration is unchanged');
+ console.log('PASS: physical cannon strikes destroy light/heavy deck AA, hull hits deal 0.5 HP, and MG penetration is unchanged');
+}

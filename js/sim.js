@@ -7,6 +7,7 @@ import { Pilot, leadPoint } from './ai.js';
 import { TYPES, GUNS, BOMBS } from './types.js';
 import { FactoryRaid } from './factory-raid.js';
 import { OperationsMission } from './operations.js';
+import { FjordMission } from './fjord.js';
 import { OPERATIONS } from './scenarios.js';
 import { TEAM, worldToField, fieldToWorld } from './world.js';
 
@@ -94,6 +95,7 @@ export class Sim {
     lw[0].stock = { bf109: 4, fw190: 2, ju87: 2, ju88: 2 }; lw[1].stock = { bf109: 4, fw190: 2, ju87: 2, ju88: 2 }; lw[2].stock = { bf109: 3, fw190: 2, ju87: 2, ju88: 2 };
     this.noPlayer = noPlayer;
     if (world.scenario === 'factory') this.mission = new FactoryRaid(this, { start: raidStart });
+    else if (world.scenario === 'fjord') this.mission = new FjordMission(this, { start: raidStart });
     else if (OPERATIONS.includes(world.scenario)) this.mission = new OperationsMission(this, { start: raidStart });
     else this.opening();
   }
@@ -455,7 +457,7 @@ export class Sim {
         const err = (25 + bd * 0.022) * this.diff.flakErr * (best === this.player ? 1.2 : 1) * (t.aimError ?? 1) * accuracy;
         _a.copy(best.pos).addScaled(best.vel, tof);
         _a.x += (rnd() - 0.5) * 2 * err; _a.y += (rnd() - 0.5) * 2 * err; _a.z += (rnd() - 0.5) * 2 * err;
-        if (t.raidGun) _a.y = Math.max(_a.y, this.world.groundAt(_a.x, _a.z) + 8);
+        if (t.raidGun) _a.y = Math.max(_a.y, this.world.groundAt(_a.x, _a.z) + 8, t.burstFloor ?? 0);
         this.shells.push({ x: _a.x, y: _a.y, z: _a.z, t: tof, team: t.team, damageScale });
         t.aimYaw = Math.atan2(_a.x - t.x, -(_a.z - t.z)); t.aimPitch = Math.atan2(_a.y - t.y, Math.hypot(_a.x - t.x, _a.z - t.z));
         this.ev({ t: 'flakfire', x: t.x, y: t.y + 3, z: t.z, gun: t });
@@ -539,9 +541,9 @@ export class Sim {
           if (!water && GUNS[kind].structDmg > 0) this.bulletStructures(x1, z1, team, kind, B.owner[i]);
           B.remove(i); continue;
         }
-        if (y1 < gh + 16 && GUNS[GUN_KINDS[B.kind[i]]].structDmg > 0) {
+        if (y1 < Math.max(gh, 0) + 24 && GUNS[GUN_KINDS[B.kind[i]]].structDmg > 0) {
           // walls of buildings / parked aircraft above ground
-          if (this.bulletStructures(x1, z1, team, GUN_KINDS[B.kind[i]], B.owner[i], y1 - gh)) { B.remove(i); continue; }
+          if (this.bulletStructures(x1, z1, team, GUN_KINDS[B.kind[i]], B.owner[i], y1 - Math.max(gh, 0))) { B.remove(i); continue; }
         }
       }
     }
@@ -551,13 +553,20 @@ export class Sim {
     const f = this.world.inField(x, z);
     if ((!f || f.team === team) && !this.mission) return false;
     const sd = GUNS[kind].structDmg;
-    for (const t of this.world.targets) {
+    const y=this.world.groundAt(x,z)+hAbove;
+    // Test exposed guns before hulls: deck mounts must not be swallowed by the ship collider.
+    for(let pass=0;pass<2;pass++) for (const t of this.world.targets) {
+      const gun=t.kind==='lightAA'||t.kind==='flak';
+      if(gun !== (pass===0))continue;
       const raidTarget = this.mission && (t.raidGun || t.kind === 'factory' || t.operationTarget);
       if ((!raidTarget && t.field !== f) || (t.team === team && !(t.kind === 'housing' && this.mission?.key === 'precision')) || !t.alive || t.kind === 'runway') continue;
       const d = Math.hypot(t.x - x, t.z - z);
-      if (d < t.r && hAbove < t.h) {
-        this.damageStructure(t, sd * (t.kind === 'ship' ? .05 : ['hangar', 'factory', 'objective', 'housing'].includes(t.kind) ? 1 : 12), owner);
-        this.ev({ t: 'hit', x, y: t.y + Math.min(hAbove, t.h * 0.7), z, struct: true, kind });
+      const withinHeight=gun ? y>=t.y-1&&y<t.y+t.h+1.5 : hAbove<t.h;
+      if (d < t.r && withinHeight) {
+        // Cannon shell hits matter to hulls; smaller machine guns retain their old penetration.
+        const multiplier=t.kind==='ship'?(kind==='cannon'?1:.05):['hangar','factory','objective','housing'].includes(t.kind)?1:12;
+        this.damageStructure(t, sd * multiplier, owner);
+        this.ev({ t: 'hit', x, y: gun?y:t.y+Math.min(hAbove,t.h*.7), z, struct: true, targetKind: t.kind, kind });
         return true;
       }
     }
@@ -568,7 +577,7 @@ export class Sim {
       const [px, pz] = fieldToWorld(f, p.u, p.v);
       if (Math.hypot(px - x, pz - z) < 6 && hAbove < 4) {
         p.hp = (p.hp ?? 14) - sd * 14;
-        this.ev({ t: 'hit', x, y: this.world.heightAt(px, pz) + 1.5, z, struct: true, kind });
+        this.ev({ t: 'hit', x, y: this.world.heightAt(px, pz) + 1.5, z, struct: true, targetKind: 'parked', kind });
         if (p.hp <= 0) this.destroyParked(f, p, owner);
         return true;
       }
@@ -616,15 +625,16 @@ export class Sim {
         }
         if(hit) {
           b.x=ox+(b.x-ox)*nearest;b.y=oy+(b.y-oy)*nearest;b.z=oz+(b.z-oz)*nearest;
+          this.mission?.rocketHit?.(hit,b.owner);
           this.damageStructure(hit,BOMBS.rocket25.dmg,b.owner);
-          this.ev({t:'hit',x:b.x,y:b.y,z:b.z,struct:true,kind:'rocket25'});
+          this.ev({t:'rocketimpact',x:b.x,y:b.y,z:b.z,surface:'ship'});
           if(b.owner?.isPlayer){this.playerStats.bombsHit++;this.mission.playerHits++;}
           this.bombs.splice(i,1);continue;
         }
         const ground=Math.max(0,this.world.heightAt(b.x,b.z));
         if(b.t>BOMBS.rocket25.life||b.y<=ground){
           this.bombs.splice(i,1);
-          if(b.y<=ground)this.ev({t:'impact',x:b.x,y:ground,z:b.z,water:ground===0,kind:'bomb'});
+          if(b.y<=ground)this.ev({t:'rocketimpact',x:b.x,y:ground,z:b.z,surface:this.world.heightAt(b.x,b.z)<=0?'water':'ground'});
         }
         continue;
       }

@@ -85,6 +85,7 @@ export const TYPES = {
   },
 };
 TYPES.mosquitorp = { ...TYPES.mosquito, name: 'MOSQUITO FB.VI · RP-3', short: 'MOSQUITO RP', bombs: 8, bombKind: 'rocket25' };
+TYPES.rocketbeau = { ...TYPES.beaufighter, name: 'BEAUFIGHTER TF.X · RP-3', short: 'ROCKET BEAU', bombs: 8, bombKind: 'rocket25', bombDelay: 0 };
 for (const k in TYPES) {
   const t = TYPES[k];
   t.key = k;

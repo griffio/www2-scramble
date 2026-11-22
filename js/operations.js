@@ -16,13 +16,13 @@ export class OperationsMission extends FactoryRaid {
     this.phaseText = 'FORM UP — FOLLOW YOUR WAYPOINT'; this.airborne = true; this.stage = 'operation';
     sim.playerTeam = this.key === 'intercept' ? 1 : 0;
     if(this.key==='fortress') sim.teams[0].name='USAAF';
-    const norway = this.key === 'norway', strike = ['convoy', 'precision', 'norway'].includes(this.key), fortress = this.key === 'fortress';
+    const norway = ['norway','fjord'].includes(this.key), strike = ['convoy', 'precision', 'norway', 'fjord'].includes(this.key), fortress = this.key === 'fortress';
     const group = sim.newGroup(sim.playerTeam, 'flight', { order: this.orderKeys[1], cruiseAlt: strike ? 90 : fortress ? 2700 : 1100, wide: 2 });
     sim.playerGroup = group; sim.playerType = this.spec.type;
-    let x = strike ? this.target.x - (['convoy','norway'].includes(this.key)?(this.quickStart?3500:8000):0) : -6700;
-    let z = strike ? (['convoy','norway'].includes(this.key)?this.target.z:this.target.z-(this.quickStart?3300:11000)) : this.quickStart?3800:-3000;
-    let alt = strike ? ['convoy','norway'].includes(this.key)?35:100 : fortress?2800:1150;
-    let hdg = ['convoy','norway'].includes(this.key)?Math.PI/2:Math.PI, speed = this.key==='convoy'?95:norway?125:strike?135:150;
+    let x = strike ? this.target.x - (['convoy','norway','fjord'].includes(this.key)?(this.quickStart?3500:8000):0) : -6700;
+    let z = strike ? (['convoy','norway','fjord'].includes(this.key)?this.target.z:this.target.z-(this.quickStart?3300:11000)) : this.quickStart?3800:-3000;
+    let alt = strike ? ['convoy','norway','fjord'].includes(this.key)?35:100 : fortress?2800:1150;
+    let hdg = ['convoy','norway','fjord'].includes(this.key)?Math.PI/2:Math.PI, speed = this.key==='convoy'?95:norway?125:strike?135:150;
     if(this.key==='intercept') { x=this.quickStart?-3200:-3000; z=this.quickStart?7800:3500; hdg=-Math.PI/2; alt=1450; }
     if(this.key==='rescue') { x=-6800; z=this.quickStart?3400:6000; hdg=0; alt=550; speed=105; }
     for(let i=0;i<4;i++) {
@@ -30,9 +30,9 @@ export class OperationsMission extends FactoryRaid {
       this.flight.push(ac); ac.opRole='wing';
     }
     if(!strike) this.populateBombers(fortress);
-    this.route = strike ? [{name:this.target.name,x:this.target.x,z:this.target.z,agl:['convoy','norway'].includes(this.key)?30:85}] : this.bomberRoute;
-    this.escapeRoute = [{ name: ['convoy','norway'].includes(this.key)?'ESCAPE WEST — CLEAR THE SHIPPING':'CLEAR THE COAST — RETURN NORTH',
-      x:['convoy','norway'].includes(this.key)?this.target.x-5500:-11000,z:['convoy','norway'].includes(this.key)?800:1200,agl:60 }];
+    this.route = strike ? [{name:this.target.name,x:this.target.x,z:this.target.z,agl:['convoy','norway','fjord'].includes(this.key)?30:85}] : this.bomberRoute;
+    this.escapeRoute = [{ name: ['convoy','norway','fjord'].includes(this.key)?'ESCAPE WEST — CLEAR THE SHIPPING':'CLEAR THE COAST — RETURN NORTH',
+      x:['convoy','norway','fjord'].includes(this.key)?this.target.x-5500:-11000,z:['convoy','norway','fjord'].includes(this.key)?800:1200,agl:60 }];
     this.shot='air-starboard';
     sim.radio(sim.playerTeam, `${this.title}: ${this.spec.brief}`, 'control', `${this.key}_intro`);
   }
@@ -105,7 +105,7 @@ export class OperationsMission extends FactoryRaid {
     if(a.opRole==='bomber') {pilot.state='navigate'; return;}
     if(a.opRole==='raider'||a.opRole==='enemyEscort') {
       if(a.hp<a.type.hp*.2 || this.sim.time > (a.attackUntil ?? Infinity)) {pilot.state='rtb'; return;}
-      let targets=this.key==='intercept'?this.flight:this.bombers.filter(b=>!this.recovered.has(b));
+      let targets=['intercept','fjord'].includes(this.key)?this.flight:this.bombers.filter(b=>!this.recovered.has(b));
       if(a.opRole==='enemyEscort') targets=this.flight;
       const candidates=targets.filter(b=>b.alive);
       candidates.sort((b,c)=>a.pos.dist(b.pos)-a.pos.dist(c.pos));
@@ -170,8 +170,8 @@ export class OperationsMission extends FactoryRaid {
         return;
       }
     }
-    if(this.key==='norway'&&this.sim.playerGroup.order==='strike'&&a.bombs) {
-      const targets=this.target.halls.filter(t=>t.alive&&!t.escort);
+    if(['norway','fjord'].includes(this.key)&&this.sim.playerGroup.order==='strike'&&a.bombs) {
+      const targets=this.target.halls.filter(t=>t.alive&&(this.key==='fjord'?t.primary:!t.escort));
       const t=targets[(this.flight.indexOf(a)-1)%targets.length];
       if(t) {
         const d=Math.hypot(t.x-a.pos.x,t.z-a.pos.z),travel=d/(a.speed+BOMBS.rocket25.velocity);
@@ -209,13 +209,13 @@ export class OperationsMission extends FactoryRaid {
   }
 
   beforeStep(dt) {
-    if(!['convoy','norway'].includes(this.key)) return;
+    if(!['convoy','norway','fjord'].includes(this.key)) return;
     for(const t of this.target.halls) {
       if(t.alive) { t.x-=Math.sin(t.yaw)*t.speed*dt;t.z-=Math.cos(t.yaw)*t.speed*dt; }
       else t.sink=Math.min(24,t.sink+dt*.3);
     }
     for(const g of this.target.guns) {
-      const v=g.vessel,sin=Math.sin(v.yaw),cos=Math.cos(v.yaw);
+      const v=g.vessel;if(!v)continue;const sin=Math.sin(v.yaw),cos=Math.cos(v.yaw);
       g.x=v.x+cos*(g.mountX??0)+sin*(g.mountZ??0);
       g.z=v.z-sin*(g.mountX??0)+cos*(g.mountZ??0);
       g.y=(g.mountY??10)-v.sink;if(!v.alive)g.alive=false;

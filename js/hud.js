@@ -99,7 +99,7 @@ export class HUD {
     g.fillText(`HDG ${String(Math.round(bearing) % 360).padStart(3, '0')} · ${(distance / 1000).toFixed(1)} KM`, x, y + 20);
     g.fillText(`SUGGESTED HEIGHT ${Math.round(w.agl * 3.281)} FT AGL`, x, y + 39);
     g.fillText(m.statusText || `${m.playerHits} BOMB HITS · B RELEASE · C CAMERA`, x, y + 58, 270);
-    const high = (!m.spec || ['convoy','precision','norway'].includes(m.key)) && !m.escaped && m.activeGuns > 0 && p.agl > 120 && Math.hypot(p.pos.x - m.target.x, p.pos.z - m.target.z) < 6500;
+    const high = (!m.spec || ['convoy','precision','norway','fjord'].includes(m.key)) && !m.escaped && m.activeGuns > 0 && p.agl > 120 && Math.hypot(p.pos.x - m.target.x, p.pos.z - m.target.z) < 6500;
     g.fillStyle = high || S.time < m.underFireUntil ? RED : AMBER;
     g.fillText(high ? 'TOO HIGH — DEADLIER AA ABOVE 400 FT' : m.defenceState, x, y + 78, 270);
     g.fillStyle = AMBER;
@@ -302,7 +302,7 @@ export class HUD {
       g.strokeStyle = t.kind === 'housing' ? '#7be4ff' : t.raidGun ? RED : 'rgba(255,200,90,0.8)'; g.lineWidth = 1.2;
       const s = clamp(2500 / d, 4, 10);
       g.beginPath(); g.moveTo(o.x, o.y - s); g.lineTo(o.x + s, o.y); g.lineTo(o.x, o.y + s); g.lineTo(o.x - s, o.y); g.closePath(); g.stroke();
-      if (d < 4000) { g.fillStyle = g.strokeStyle; g.fillText(t.raidGun ? (t.heavy ? 'FLAK' : 'AA') : t.kind === 'housing' ? 'PROTECTED HOUSING' : t.kind === 'ship' ? (t.destroyer ? 'DESTROYER · AA / FLAK' : t.submarine ? 'U-BOAT · BONUS' : t.escort ? 'ARMED ESCORT' : 'MERCHANT') : t.kind === 'objective' ? 'OBJECTIVE' : t.kind === 'factory' ? 'FACTORY' : t.kind === 'hangar' ? 'HANGAR' : 'RUNWAY', o.x, o.y - s - 4); }
+      if (d < 4000) { g.fillStyle = g.strokeStyle; g.fillText(t.raidGun ? (t.heavy ? 'FLAK' : 'AA') : t.kind === 'housing' ? 'PROTECTED HOUSING' : t.kind === 'ship' ? (t.primary ? 'Z33 · PRIMARY TARGET' : t.destroyer ? 'DESTROYER · AA / FLAK' : t.submarine ? 'U-BOAT · BONUS' : t.escort ? 'ARMED ESCORT' : 'MERCHANT') : t.kind === 'objective' ? 'OBJECTIVE' : t.kind === 'factory' ? 'FACTORY' : t.kind === 'hangar' ? 'HANGAR' : 'RUNWAY', o.x, o.y - s - 4); }
       if(t.kind==='ship'&&!t.escort&&S.player?.bombs) {
         const p=S.player, travel=Math.hypot(t.x-p.pos.x,t.z-p.pos.z)/(p.type.bombKind==='rocket25'?p.speed+BOMBS.rocket25.velocity:45);
         const lx=t.x-Math.sin(t.yaw)*t.speed*travel,lz=t.z-Math.cos(t.yaw)*t.speed*travel;

@@ -10,7 +10,7 @@ import { steer, leadPoint, Pilot } from './ai.js';
 import { buildModels, STATIC_CAMO } from './models.js';
 import { MeshBuilder, MAT } from './mesh.js';
 import { Renderer } from './render.js';
-import { Particles, P, explosion, flakBurst, impact, hitSparks } from './particles.js';
+import { Particles, P, explosion, flakBurst, impact, hitSparks, rocketImpact, cannonImpact, rocketTrail } from './particles.js';
 import { HUD } from './hud.js';
 import { Input, PAD } from './input.js';
 import { GameAudio } from './audio.js';
@@ -638,6 +638,7 @@ class Game {
     const sim = this.sim, ps = this.ps, A = this.audio, p = sim.player;
     const near = (x, y, z, r) => { const dx = x - this.cam.pos.x, dy = y - this.cam.pos.y, dz = z - this.cam.pos.z; return dx * dx + dy * dy + dz * dz < r * r; };
     const play = this.state === 'play' || this.state === 'ending';
+    const fjord = sim.mission?.key === 'fjord';
     for (const e of sim.events) {
       switch (e.t) {
         case 'gun': {
@@ -656,10 +657,25 @@ class Game {
         case 'hit': {
           const big = e.kind === 'cannon' || e.kind === 'aa';
           const vx = e.ac ? e.ac.vel.x : 0, vy = e.ac ? e.ac.vel.y : 0, vz = e.ac ? e.ac.vel.z : 0;
-          if (near(e.x, e.y, e.z, 4000)) hitSparks(ps, e.x, e.y, e.z, vx, vy, vz, big);
+          const shellStrike=e.struct&&e.kind==='cannon';
+          if (near(e.x, e.y, e.z, 4000)) {
+            if(shellStrike) cannonImpact(ps,e.x,e.y,e.z,e.targetKind);
+            else hitSparks(ps, e.x, e.y, e.z, vx, vy, vz, big);
+          }
+          if(shellStrike) A.cannonImpact(e);
           if (e.ac && e.ac === p) { A.playerHit(big ? 0.8 : 0.4); this.shake = Math.max(this.shake, big ? 0.35 : 0.15); this.rum.s = Math.max(this.rum.s, big ? 0.9 : 0.55); }
-          else if (near(e.x, e.y, e.z, 400)) A.impact(e, 'metal');
+          else if (!shellStrike && near(e.x, e.y, e.z, 400)) A.impact(e, 'metal');
           if (e.ac && e.ac !== p && sim.playerTarget === e.ac) this.hitMarker = 0.15;
+          break;
+        }
+        case 'rocketimpact': {
+          if(near(e.x,e.y,e.z,6500)) rocketImpact(ps,e.x,e.y,e.z,e.surface);
+          A.rocketImpact(e,e.surface,fjord);
+          const d=Math.hypot(e.x-this.cam.pos.x,e.y-this.cam.pos.y,e.z-this.cam.pos.z);
+          if(play) {
+            this.shake=Math.max(this.shake,clamp(65/(d+60),0,.45));
+            this.rum.s=Math.max(this.rum.s,clamp(90/(d+60),0,.7));
+          }
           break;
         }
         case 'impact':
@@ -674,8 +690,8 @@ class Game {
         case 'debris':
           for (let k = 0; k < 6; k++) ps.emit(P.debris, e.x, e.y, e.z, e.vx * 0.6 + (rnd() - 0.5) * 50, e.vy * 0.6 + rnd() * 30, e.vz * 0.6 + (rnd() - 0.5) * 50, 1 + rnd(), 2);
           break;
-        case 'flak': flakBurst(ps, e.x, e.y, e.z); A.flak(e); if (play) { const d = Math.hypot(e.x - this.cam.pos.x, e.y - this.cam.pos.y, e.z - this.cam.pos.z); this.rum.s = Math.max(this.rum.s, clamp(60 / (d + 20), 0, 0.7)); this.shake = Math.max(this.shake, clamp(30 / (d + 25), 0, 0.45)); } break;
-        case 'flakfire': if (near(e.x, e.y, e.z, 5000)) { ps.emit(P.flash, e.x, e.y + 2, e.z, 0, 0, 0, 0.6); ps.emit(P.smoke, e.x, e.y + 3, e.z, 0, 4, 0, 1); } break;
+        case 'flak': flakBurst(ps, e.x, e.y, e.z, fjord); A.flak(e, fjord); if (play) { const d = Math.hypot(e.x - this.cam.pos.x, e.y - this.cam.pos.y, e.z - this.cam.pos.z); this.rum.s = Math.max(this.rum.s, clamp(60 / (d + 20), 0, 0.7)); this.shake = Math.max(this.shake, clamp(30 / (d + 25), 0, 0.45)); } break;
+        case 'flakfire': if (near(e.x, e.y, e.z, 5000)) { if(fjord) A.flakGun(e); ps.emit(P.flash, e.x, e.y + 2, e.z, 0, 0, 0, 0.6); ps.emit(P.smoke, e.x, e.y + 3, e.z, 0, 4, 0, 1); } break;
         case 'bombdrop':
           if (e.ac.type.bombKind === 'rocket25') {
             A.rocketLaunch(e.ac.pos, e.ac === p);
@@ -697,7 +713,7 @@ class Game {
         case 'fade': this.fade(); break;
         case 'towed': if (play) { this.chaseInit = false; this.hud.radio('TOWED TO THE RUNWAY - CLEARED FOR TAKE-OFF', 'good'); } break;
         case 'playerhit': this.dmgFlash = Math.min(0.8, (this.dmgFlash || 0) + e.dmg * 0.04); break;
-        case 'playerdown': if (play) { this.hud.big('SHOT DOWN', 'You bail out over the Channel...', 3, 'rgba(255,90,60,0.95)'); A.ui('defeat'); this.say('player_down'); } break;
+        case 'playerdown': if (play) { this.hud.big('SHOT DOWN', 'Your aircraft has been lost.', 3, 'rgba(255,90,60,0.95)'); A.ui('defeat'); this.say('player_down'); } break;
       }
     }
     sim.events.length = 0;
@@ -751,16 +767,19 @@ class Game {
         ps.emit(P.dust, a.pos.x - a.fwd.x * 6, a.pos.y - 2, a.pos.z - a.fwd.z * 6, (rnd() - 0.5) * 4, 1, (rnd() - 0.5) * 4, 1.5);
       }
     }
+    // Continuous trails throughout flight, independent of the slower wreck/ship emitter timer.
+    for(const b of this.sim.bombs) if(b.rocket && Math.hypot(b.x-this.cam.pos.x,b.y-this.cam.pos.y,b.z-this.cam.pos.z)<9000) rocketTrail(ps,b,dt);
     // burning wrecks and destroyed buildings (the timers always run; only nearby ones get particles)
     this.wreckT = (this.wreckT || 0) + dt;
     if (this.wreckT > 0.12) {
       this.wreckT = 0;
       const cx = this.cam.pos.x, cz = this.cam.pos.z, farSq = 9000 * 9000;
-      for (const t of ['convoy','norway'].includes(this.sim.mission?.key) ? this.sim.mission.target.halls : []) if(t.alive) {
+      for (const t of ['convoy','norway','fjord'].includes(this.sim.mission?.key) ? this.sim.mission.target.halls : []) if(t.alive) {
         const s = Math.sin(t.yaw), c = Math.cos(t.yaw);
+        if(t.hp<=t.maxHp*.5) ps.emit(P.blackSmoke,t.x,t.y+14,t.z,0,3,0,1.5,1.2);
         ps.emit(P.vapour, t.x + s*t.length*.45, .3, t.z + c*t.length*.45, s*2, 0, c*2, 3, 2);
       }
-      for (const b of this.sim.bombs) if(b.rocket && b.t < .65) ps.emit(P.smoke,b.x,b.y,b.z,-b.vx*.05,-b.vy*.05,-b.vz*.05,.4);
+
       for (const b of this.sim.bombs) if(b.running) ps.emit(P.vapour,b.x,.25,b.z,-b.vx*.03,0,-b.vz*.03,.35,1.2);
       for (const w of this.sim.wrecks) {
         w.t += 0.12;
@@ -1248,7 +1267,7 @@ class Game {
       S.outOfBounds = Math.abs(p.pos.x) > MAP_HALF || Math.abs(p.pos.z) > MAP_HALF;
     }
     S.groundTargets = [];
-    if (p && p.alive && p.type.bombs) for (const t of this.world.targets) if (t.team !== p.team && t.alive && (sim.mission ? t.kind === 'factory' || t.raidGun || (sim.mission.key === 'norway' && t.kind === 'ship') : t.kind === 'hangar' || t.kind === 'runway')) S.groundTargets.push(t);
+    if (p && p.alive && p.type.bombs) for (const t of this.world.targets) if (t.team !== p.team && t.alive && (sim.mission ? t.kind === 'factory' || t.raidGun || (['norway','fjord'].includes(sim.mission.key) && t.kind === 'ship') : t.kind === 'hangar' || t.kind === 'runway')) S.groundTargets.push(t);
     S.status = [sim.teamStatus(0), sim.teamStatus(1)];
     if (sim.mission?.groundTargets) S.groundTargets = sim.mission.groundTargets.filter(t => t.alive);
     S.raid = sim.raidWarning; S.time = sim.time; S.score = this.score; S.stats = sim.playerStats;

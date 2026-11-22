@@ -544,7 +544,7 @@ function spitfire() {
 }
 
 // ==================================================================== MOSQUITO FB.VI
-function mosquito() {
+function mosquito(rockets = false) {
   const b = new MeshBuilder(), g = new MeshBuilder(), K = 24;
   const fus = new Body([
     [-5.32, 0.04, 0.04, 0.04, -0.1, 2], [-5.12, 0.28, 0.27, 0.3, -0.08, 2], [-4.6, 0.47, 0.47, 0.52, -0.06, 2],
@@ -629,6 +629,7 @@ function mosquito() {
   strut(g, [0, 0.0, 6.15], [0, -0.42, 6.3], 0.04);
   wheel(g, [0, -0.42, 6.3], 0.14, 0.09, COL.hub, 10);
   const ha2 = wing.at(4.0);
+  if(rockets) rocketRails(b,wing,-.75);
   return finish(b, g, {
     fixedGear: false,
     camo: { a: [0.36, 0.38, 0.41], b: [0.22, 0.27, 0.17], under: [0.55, 0.57, 0.57], scale: 3.0 },
@@ -651,7 +652,7 @@ function mosquito() {
 
 // ==================================================================== Bristol Beaufighter
 // Broad wings, a short blunt nose, two Hercules radial cowlings and a separate observer's blister.
-function beaufighter() {
+function beaufighter(rockets = false) {
   const b = new MeshBuilder(), g = new MeshBuilder();
   const fus = new Body([
     [-5.8, 0.16, 0.2, 0.25], [-5.4, 0.62, 0.6, 0.65], [-4.2, 0.76, 0.76, 0.8],
@@ -680,7 +681,7 @@ function beaufighter() {
   spinner(b, 0, 0, -4.05, -4.5, 0.25, COL.black, MAT.PLAIN, 18, 0.7);
   b.pop();
   const rack = wing.at(4.5);
-  b.box(4.5, rack.y - 0.25, 0.3, 0.12, 0.28, 1, W, MAT.UNDER);
+  if(!rockets) b.box(4.5, rack.y - 0.25, 0.3, 0.12, 0.28, 1, W, MAT.UNDER);
   for (const x of [5.1, 5.5, 5.9]) bar(b, [x, wing.at(x).y, wing.at(x).z], [x, wing.at(x).y, wing.at(x).z - 0.2], 0.022, COL.gun, MAT.METAL, 6);
   b.mirrorX(mark.v, mark.i);
   loftM(b, fus.rings(0.3, 24), splitMat(24, 15), { capStart: true, capEnd: true });
@@ -700,6 +701,7 @@ function beaufighter() {
   g.mirrorX(gm.v, gm.i);
   strut(g, [0, -0.1, 5.6], [0, -0.7, 5.8], 0.05);
   wheel(g, [0, -0.7, 5.8], 0.2, 0.12);
+  if(rockets) rocketRails(b,wing,-.85);
   return finish(b, g, {
     fixedGear: false, camo: { a: [0.29, 0.32, 0.28], b: [0.22, 0.23, 0.2], under: [0.57, 0.63, 0.62], scale: 3 },
     props: [-nx, nx].map((x) => ({ x, y: -0.1, z: -4.3, r: 1.8, blades: 3, dir: 1 })),
@@ -1748,10 +1750,26 @@ function torpedo() {
   b.box(0,0,2.3,.85,.05,.65,COL.hub,MAT.METAL);b.box(0,0,2.3,.05,.85,.65,COL.hub,MAT.METAL);return b.build();
 }
 
+// Permanent launch rails are part of the aircraft mesh, independent of remaining ammunition.
+function rocketRails(b,wing,rocketY) {
+  for(const side of [-1,1]) for(let i=0;i<4;i++) {
+    const x=side*(4.1+i*.42),y=rocketY+.18,z=-.4;
+    // Broad metallic runner with a dark underside and a bright edge visible from chase view.
+    b.box(x,y,z,.18,.14,2.7,[.38,.41,.43],MAT.METAL);
+    b.box(x,y-.075,z,.13,.025,2.65,[.12,.14,.15],MAT.PLAIN);
+    b.box(x+side*.075,y+.075,z,.035,.025,2.7,[.68,.7,.69],MAT.METAL);
+    const top=wing.at(Math.abs(x)).y-.12;
+    for(const dz of [-.8,.7]) {
+      b.box(x,(top+y)/2,z+dz,.15,Math.max(.12,top-y),.18,[.22,.25,.26],MAT.METAL);
+      b.box(x,y+.1,z+dz,.27,.08,.2,[.5,.53,.54],MAT.METAL);
+    }
+  }
+}
+
 // ==================================================================== export
 export function buildModels() {
   return {
-    aircraft: { mosquitorp: (() => { const a=mosquito(); a.hardpoints=Array.from({length:8},(_,i)=>({x:(i%2?1:-1)*(4.1+Math.floor(i/2)*.42),y:-.75,z:-.4,kind:'rocket25'}));return a; })(), boston: alliedAircraft('boston'), b17: alliedAircraft('b17'), p51: alliedAircraft('p51'), torbeau: (() => { const a=beaufighter(); a.hardpoints=[{x:0,y:-1.25,z:0,kind:'torpedo18'}]; return a; })(), spitfire: spitfire(), mosquito: mosquito(), beaufighter: beaufighter(), bf109: bf109(), fw190: fw190(), ju87: ju87(), ju88: ju88() },
+    aircraft: { rocketbeau: (() => { const a=beaufighter(true); a.hardpoints=Array.from({length:8},(_,i)=>({x:(i%2?1:-1)*(4.1+Math.floor(i/2)*.42),y:-.85,z:-.4,kind:'rocket25'}));return a; })(), mosquitorp: (() => { const a=mosquito(true); a.hardpoints=Array.from({length:8},(_,i)=>({x:(i%2?1:-1)*(4.1+Math.floor(i/2)*.42),y:-.75,z:-.4,kind:'rocket25'}));return a; })(), boston: alliedAircraft('boston'), b17: alliedAircraft('b17'), p51: alliedAircraft('p51'), torbeau: (() => { const a=beaufighter(); a.hardpoints=[{x:0,y:-1.25,z:0,kind:'torpedo18'}]; return a; })(), spitfire: spitfire(), mosquito: mosquito(), beaufighter: beaufighter(), bf109: bf109(), fw190: fw190(), ju87: ju87(), ju88: ju88() },
     props: { prop3: propeller(3), prop4: propeller(4) },
     statics: {
       objective: objectiveBuilding(), housing: objectiveBuilding(true), ship: merchantShip(), destroyer: escortDestroyer(), rocket25: rocket25(), submarine: submarine(), torpedo18: torpedo(),

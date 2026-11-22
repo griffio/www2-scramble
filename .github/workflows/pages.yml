@@ -36,6 +36,8 @@ jobs:
           node tools/raidtest.mjs
           node tools/operationstest.mjs
           node tools/norwaytest.mjs
+          node tools/fjordtest.mjs
+          node tools/fjorddefencetest.mjs
           node tools/rocketaudiotest.mjs
           node tools/menutest.mjs
           node tools/voices/make-voices.mjs check

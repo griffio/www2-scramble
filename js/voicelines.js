@@ -154,3 +154,19 @@ export const AMERICAN_TEXT = {
   player_down: 'Mustang Leader is hit! Bail out! Get out of there!',
 };
 export const voicePackFor = scenario => scenario === 'fortress' ? 'american' : 'british';
+
+// New mission captions awaiting recordings: ElevenLabs quota is exhausted.
+// Keep these outside the recorded catalog so audio verification stays strict.
+export const CAPTION_ONLY_LINES = {
+  fjord_intro: ['control', 'Coastal Command to Strike Leader. Enemy destroyer sheltering in the fjord. Go in low, suppress the guns and strike her hull with rockets. Cripple her, then bring your section back to open sea.'],
+  fjord_target: ['crew', 'Destroyer ahead, skipper. Close to rocket range. Keep her steady and aim for the waterline.'],
+  fjord_rockets: ['crew', 'Rockets away! Watch the waterline, then break clear!'],
+  fjord_crippled: ['crew', 'She is crippled! We can leave now. Another pass might sink her. Your call, skipper.'],
+  fjord_sunk: ['crew', 'Destroyer sinking! Recall the section. West to open water!'],
+  fjord_fighters: ['control', 'Focke-Wulfs entering the fjord! Finish your run and bring the section out!'],
+  fjord_order_suppress: ['you', 'Section, suppress the deck guns. Keep your rockets.'],
+  fjord_order_cover: ['you', 'Break off. Regroup and cover the withdrawal.'],
+  fjord_order_strike: ['you', 'Section, attack the destroyer. Rockets into the hull.'],
+  fjord_success: ['control', 'Strike confirmed. Your aircraft is clear of the fjord. Good show. Bring them home.'],
+  fjord_failed: ['control', 'The strike has failed. Break off and return to base.'],
+};

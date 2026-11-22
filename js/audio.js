@@ -559,6 +559,7 @@ const TYPES = {
   boston: { eng: 'bmw801', rate: 0.9, twin: true, gain: 1.2, cut: 0.8 },
   b17: { eng: 'bmw801', rate: 0.8, twin: true, gain: 1.5, cut: 0.7 },
   p51: { eng: 'merlin', rate: 1.05, gain: 1, cut: 1 },
+  rocketbeau: { eng: 'bmw801', rate: 0.82, twin: true, gain: 1.3, cut: 0.75 },
   beaufighter: { eng: 'bmw801', rate: 0.82, twin: true, gain: 1.3, cut: 0.75 },
   bf109: { eng: 'db605', rate: 1.0, twin: false, gain: 1.0, cut: 1.0 },
   fw190: { eng: 'bmw801', rate: 1.0, twin: false, gain: 1.1, cut: 0.95 },
@@ -1415,14 +1416,14 @@ export class GameAudio {
     return P;
   }
   // positional one-shot: attenuation ref distance, cull distance
-  _playAt(buf, bus, pos, gain, ref, maxD, rate, sendBase, prio, cutMul = 1) {
+  _playAt(buf, bus, pos, gain, ref, maxD, rate, sendBase, prio, cutMul = 1, extraDelay = 0) {
     const sp = this._spatial(pos.x, pos.y, pos.z);
     const d = sp.d;
     if (d > maxD) return null;
     const att = ref / (ref + d);
     let cut = this._airCut(d) * cutMul;
     if (sp.front < 0) cut *= 1 + 0.4 * sp.front;
-    return this._play(buf, bus, gain * att, rate, d / C, pos, sp.pan, cut, clamp(sendBase + d / 4000, 0, 0.7), prio);
+    return this._play(buf, bus, gain * att, rate, d / C + extraDelay, pos, sp.pan, cut, clamp(sendBase + d / 4000, 0, 0.7), prio);
   }
 
   // ------------------------------------------------------------------ public one-shots
@@ -1468,13 +1469,54 @@ export class GameAudio {
     } catch (e) { this._fail(e); }
   }
 
-  flak(pos) {
+  rocketImpact(pos, surface, fjord = false) {
+    if (!this._ok() || this._muted) return;
+    // Larger distant report and bass tail, including misses beyond the old 300 m impact cutoff.
+    this.explosion(pos, surface === 'water' ? 1.9 : 2.3);
+    try {
+      const p=this._pos(pos);if(!p)return;
+      if(surface==='water') this._playAt(this._pick(this.buf.water),this.bus.fx,p,1.4*this._trim('water'),100,6500,.78,.2,2);
+      if(fjord) this._playAt(this._pick(this.buf.expFar),this.bus.fx,p,.5*this._trim('expFar'),160,5000,.85,.4,.7,.6,.35);
+    } catch(e) { this._fail(e); }
+  }
+
+  flak(pos, fjord = false) {
     if (!this._ok() || this._muted) return;
     try {
       const p = this._pos(pos);
       if (!p) return;
-      this._playAt(this._pick(this.buf.flak), this.bus.fx, p, 0.9 * this._trim('flak'), 60, 7000, RNG.range(0.9, 1.1), 0.18, 2);
+      const burst=this._pick(this.buf.flak);
+      this._playAt(burst, this.bus.fx, p, (fjord ? 1.15 : .9) * this._trim('flak'), fjord ? 95 : 60, 7000, RNG.range(.9,1.1), fjord ? .3 : .18, 2);
+      if(fjord) {
+        // Quiet, dark reflections after the direct crack; use the existing bounded voice pool.
+        this._playAt(burst,this.bus.fx,p,.38*this._trim('flak'),130,4500,.82,.45,.6,.65,.28);
+        this._playAt(burst,this.bus.fx,p,.20*this._trim('flak'),150,4500,.76,.5,.4,.45,.57);
+      }
     } catch (e) { this._fail(e); }
+  }
+
+  flakGun(pos) {
+    if (!this._ok() || this._muted) return;
+    try {
+      const p=this._pos(pos);if(!p)return;
+      const report=this._pick(this.buf.cannon);
+      this._playAt(report,this.bus.fx,p,1.05*this._trim('cannon'),95,5000,.68,.2,1,.8);
+      this._playAt(report,this.bus.fx,p,.28*this._trim('cannon'),120,3500,.6,.4,.4,.5,.32);
+    } catch(e) { this._fail(e); }
+  }
+
+  cannonImpact(pos) {
+    if (!this._ok() || this._muted) return;
+    // Four cannon often hit in one frame: one report per volley keeps the mix clear.
+    const now=this.ctx.currentTime;
+    if(now-(this._lastCannonImpact ?? -Infinity)<.06)return;
+    try {
+      const p=this._pos(pos);if(!p)return;
+      if(this._spatial(p.x,p.y,p.z).d>3000)return;
+      this._lastCannonImpact=now;
+      this._playAt(this._pick(this.buf.expClose),this.bus.fx,p,.75*this._trim('expClose'),55,3000,1.3,.1,1.5);
+      this._playAt(this._pick(this.buf.metal),this.bus.fx,p,.8*this._trim('metal'),30,1800,.92,.05,1);
+    } catch(e) { this._fail(e); }
   }
 
   impact(pos, kind) {
